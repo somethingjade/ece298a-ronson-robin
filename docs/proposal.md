@@ -3,9 +3,12 @@
 ## Statement of purpose
 We are implementing the SPONGENT-88 hash function [1]. From the original paper: “As crucial applications go pervasive, the need for security in RFID and sensor networks is dramatically increasing, which requires secure yet efficiently implementable cryptographic primitives including secret-key ciphers and hash functions” [1].
 
+According to [1], as of 2011, SPONGENT had the smallest hardware footprint relative to comparably secure hash functions. This is why we chose it.
+
 We will implement this as a SPI peripheral (slave) device.
 
 ## System diagram
+![System diagram](./embed/system_diagram.jpg)
 
 ## IO pin assignment table (Tiny Tapeout pins)
 
