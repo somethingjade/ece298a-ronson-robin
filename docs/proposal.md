@@ -5,7 +5,7 @@ We are implementing the SPONGENT-88 hash function [1]. From the original paper: 
 
 According to [1], as of 2011, SPONGENT had the smallest hardware footprint relative to comparably secure hash functions. This is why we chose it.
 
-We will implement this as a SPI peripheral (slave) device.
+We will implement this as a SPI peripheral (slave) device. To minimize hardware footprint, we will serialize as much as possible [1].
 
 ## System diagram
 ![System diagram](./embed/system_diagram.jpg)
@@ -14,19 +14,31 @@ We will implement this as a SPI peripheral (slave) device.
 
 | Tiny Tapeout Pin | Assignment |
 |:---:|:---:|
-| ui[0] | SCLK |
-| ui[1] | CS |
-| ui[2] | MOSI |
-| uo[0] | MISO |
+| uio[0] | CS |
+| uio[1] | MOSI |
+| uio[2] | MISO |
+| uio[3] | SCK |
 
 All other pins unused.
 
 ## Proposed specification
 | Parameter | Value |
 |:---:|:---:|
-| Max SCLK frequency | TBD |
+| Tiles | 1x1 |
+| Interface | SPI |
+| Bit order | MSB first |
+| Byte order | Big-endian |
+| Message format | See below |
+| Clock frequency | 50 MHz |
+| Max SCK frequency | 12.5 MHz |
 
 Refer to [1] for SPONGENT-88 algorithm specifications.
+
+### Message format
+Each command consists of a 10-bit MOSI frame:
+| Bit 9 | Bit 8 | Bits 7:0 |
+|:---:|:---:|:---:|
+| r/w<br>0: write<br>1: read | Register select<br>0: data<br>1: control/status | Payload for write<br>Don't care for reads |
 
 ## Timeline for completion | Who does what
 | Date | Milestone | Done by |
