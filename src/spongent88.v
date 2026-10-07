@@ -100,7 +100,7 @@ module spongent88_core (
 					end
 				end
 				default: begin
-					fsr_state <= IDLE;
+					fsm_state <= IDLE;
 				end
 			endcase
 		end
