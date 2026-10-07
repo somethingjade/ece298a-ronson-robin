@@ -81,6 +81,7 @@ module spongent88_core (
 								miso <= 8'b10000000;
 							end
 						end
+						default:
 					endcase
 				end
 			end
@@ -97,6 +98,7 @@ module spongent88_core (
 						fsm_state <= LFSR;
 					end
 				end
+				default:
 			endcase
 		end
 	end
