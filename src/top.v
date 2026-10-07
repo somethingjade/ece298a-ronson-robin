@@ -5,9 +5,6 @@
 
 `default_nettype none
 
-`include "spi.v"
-`include "spongent88.v"
-
 module tt_um_spongent88_top (
     input  wire [7:0] ui_in,    // Dedicated inputs
     output wire [7:0] uo_out,   // Dedicated outputs

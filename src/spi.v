@@ -1,4 +1,5 @@
 `default_nettype none
+`error "SPI.V IS BEING COMPILED"
 
 module spi_controller (
 	input wire clk,      // clock
