@@ -38,9 +38,6 @@ module spongent88_core (
 			state <= 88'b0;
 		end else begin
 			if (sck_fall) begin
-				// shift tx on sck fall
-				miso <= { miso[6:0], 1'b0 };
-
 				// read in new bit
 				if (fsm_state != ABSORB && fsm_state != SQUEEZE) begin
 					if (msg_counter < 2) begin
@@ -73,17 +70,13 @@ module spongent88_core (
 						end
 						// read status
 						2'b11: begin
-							if (fsm_state == IDLE) begin
-								// not busy
-								miso <= 8'b00000000;
-							end else begin
-								// busy
-								miso <= 8'b10000000;
-							end
+							miso <= (fsm_state == IDLE) ? 8'b00000000 : 8'b10000000;
 						end
 						default: begin
 						end
 					endcase
+				end else begin
+					miso <= { miso[6:0], 1'b0 };
 				end
 			end
 
@@ -100,7 +93,6 @@ module spongent88_core (
 					end
 				end
 				default: begin
-					fsm_state <= IDLE;
 				end
 			endcase
 		end
