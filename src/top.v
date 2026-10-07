@@ -45,6 +45,6 @@ module tt_um_spongent88_top (
   assign uio_oe  = 8'b00000100;
 
   // List all unused inputs to prevent warnings
-  wire _unused = &{ena, clk, rst_n, 1'b0};
+  wire _unused = &{ena, ui_in[7:0], uio_in[7:4], uio_in[2], 1'b0};
 
 endmodule
