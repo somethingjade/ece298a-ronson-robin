@@ -1,9 +1,9 @@
 # Tiny Tapeout project information
 project:
-  title:        ""      # Project title
-  author:       ""      # Your name
+  title:        "Serialized SPONGENT-88 Hash Accelerator"      # Project title
+  author:       "Ronson Zhao, Robin Yan"      # Your name
   discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
-  description:  ""      # One line description of what your project does
+  description:  "Serialized implementation of the SPONGENT-88 hash function"      # One line description of what your project does
   language:     "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
   # 50 mhz
   clock_hz:     50000000       # Clock frequency in Hz (or 0 if not applicable)
