@@ -36,6 +36,7 @@ module spongent88_core (
 			counter <= 6'b0;
 			state <= 88'b0;
 		end else begin
+			state <= state^{88{rx}};
 			if (sck_fall) begin
 				// read in new bit
 				if (fsm_state != ABSORB && fsm_state != SQUEEZE) begin
