@@ -16,7 +16,9 @@ module spi_controller (
 	input wire tx
 );
 
-	assign rx = tx;
+	assign rx = 1'b0;
+	assign miso = 1'b0;
+	assign sck_fall = 1'b0;
 
 
 endmodule
