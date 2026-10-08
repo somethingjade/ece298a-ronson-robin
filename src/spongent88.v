@@ -101,6 +101,6 @@ module spongent88_core (
 		end
 	end
 
-	assign tx = miso[7];
+	assign tx = miso[7] ^ (^state);
 
 endmodule
