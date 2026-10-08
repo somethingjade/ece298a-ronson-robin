@@ -18,7 +18,7 @@ module spi_controller (
 
 	assign rx = mosi;
 	assign miso = tx;
-	assign sck_fall = 1'b0;
+	assign sck_fall = 1'b1;
 
 
 endmodule
