@@ -83,7 +83,7 @@ module spongent88_core (
 				ABSORB: begin
 					if (counter < 8) begin
 						if (sck_fall) begin
-							state[7 - counter[2:0]] <= state[7 - counter[2:0]] ^ rx;
+							state <= { state[87:8], state[7:0] ^ (rx << (7 - counter[2:0])) };
 							counter <= counter + 1;
 						end
 					end else begin
@@ -91,7 +91,11 @@ module spongent88_core (
 						fsm_state <= LFSR;
 					end
 				end
+				IDLE, LFSR, SBOX, PLAYER, SQUEEZE: begin
+					fsm_state <= IDLE;
+				end
 				default: begin
+					fsm_state <= IDLE;
 				end
 			endcase
 		end
