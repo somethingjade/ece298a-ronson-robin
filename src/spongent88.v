@@ -17,7 +17,7 @@ module spongent88_core (
 	localparam PLAYER = 3'b100;
 	localparam SQUEEZE = 3'b101;
 
-	reg [2:0] fsm_state;
+	(* keep = "true" *) reg [2:0] fsm_state;
 
 	reg [1:0] command;
 	reg [7:0] miso;
@@ -25,7 +25,7 @@ module spongent88_core (
 	reg [3:0] msg_counter;
 	reg [5:0] counter;
 
-	reg [87:0] state;
+	(* keep = "true" *) reg [87:0] state;
 
 	always @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
