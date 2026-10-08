@@ -18,13 +18,13 @@ module spongent88_core (
 	localparam PLAYER = 3'b100;
 	localparam SQUEEZE = 3'b101;
 
-	(* keep = "true" *) reg [2:0] fsm_state;
+	(* keep = "true", fsm_encoding = "none" *) reg [2:0] fsm_state;
 
-	reg [1:0] command;
-	reg [7:0] miso;
+	(* keep = "true" *) reg [1:0] command;
+	(* keep = "true" *) reg [7:0] miso;
 
-	reg [3:0] msg_counter;
-	reg [5:0] counter;
+	(* keep = "true" *) reg [3:0] msg_counter;
+	(* keep = "true" *) reg [5:0] counter;
 
 	(* keep = "true" *) reg [87:0] state;
 
