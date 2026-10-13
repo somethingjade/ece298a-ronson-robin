@@ -99,27 +99,49 @@ module spi_controller (
 
 	assign tx = rx;
 
-	reg sck_prev;
+	reg sck_next;
 	reg sck_sync;
 
-	reg mosi_prev;
+	reg mosi_next;
 	reg mosi_sync;
 
 	// Defining combinational behavior
 	
 	assign tx = mosi_sync;
-	assign sck_fall = (!sck_sync) & sck_prev;
-	assign sck_rise = (!sck_prev) & sck_sync;
+	assign sck_rise = (!sck_sync) & sck_next;
+	assign sck_fall = (!sck_next) & sck_sync;
 
 	// Defining sequential behavior
-	always @(posedge clk) begin
-		// Shift values
-		sck_sync <= sck_prev;
-		mosi_sync <= mosi_prev;
-		sck_prev <= sck;
-		mosi_prev <= mosi;
+	always @(posedge clk or negedge rst_n or negedge cs_n) begin
+		if (!rst_n) begin
+			// I can foresee issues with this implementation. What if during reboot, clock is actually
+			// high, then you would get a rising edge immediately since sck_next reads in sck
+			sck_next <= 0; // in SPI mode 0, the clock is idle when low
+			sck_sync <= 0;
+			mosi_next <= 0;
+			mosi_sync <= 0;
+		end else begin // If in normal operation
+			if (!cs_n) begin // MOSI only read if chip select
+				// Conceptually, we sample on rising edge, but tx is assigned to mosi_sync, and mosi_sync
+				// is always being updated every clock cycle. Thus, as long as sck_rise is true, any module
+				// can sample the current tx and get the value at the right time, rather than the SPI module
+				// managing the internal timing. While not considered OOP design, this reduces complexity of other modules
+				// handling timing of data transfer to and from the SPI module. As such, SPI just becomes an interface
+				mosi_sync <= mosi_next;
+				mosi_next <= mosi;
+			end
 
+			// SPI clock always tracked independent of cs_n
+			sck_sync <= sck_next;
+			sck_next <= sck;
+			
+		end
 	end
 
+	// Questions to be answered
+	// Who is keeping track of 16 total bits?
+	// How do we know when the next message is coming?
+	// How does the host know when to send the next message (after the 45 rounds?)
+	// How does SPI know when to send output, and how will host know output is ready?
 
 endmodule
