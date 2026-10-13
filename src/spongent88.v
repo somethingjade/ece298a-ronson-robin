@@ -5,6 +5,7 @@ module spongent88_core (
     input wire rst_n,     // reset_n - low to reset
 
     input wire rx, // synchronized data bit from spi
+    input wire sck_rise, // sck falling edge. used to synchronize with spi
     input wire sck_fall, // sck falling edge. used to synchronize with spi
 
     output wire tx // bit to be sent over miso
@@ -17,17 +18,16 @@ module spongent88_core (
 	localparam PLAYER = 3'b100;
 	localparam SQUEEZE = 3'b101;
 
-	reg [2:0] fsm_state;
+	(* keep = "true", fsm_encoding = "none" *) reg [2:0] fsm_state;
 
-	reg [1:0] command;
-	reg [7:0] miso;
+	(* keep = "true" *) reg [1:0] command;
+	(* keep = "true" *) reg [7:0] miso;
 
-	reg [3:0] msg_counter;
-	reg [5:0] counter;
+	(* keep = "true" *) reg [3:0] msg_counter;
+	(* keep = "true" *) reg [5:0] counter;
 
-	reg [87:0] state;
+	(* keep = "true" *) reg [87:0] state;
 
-	// TODO: reset
 	always @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
 			fsm_state <= IDLE;
@@ -37,20 +37,12 @@ module spongent88_core (
 			counter <= 6'b0;
 			state <= 88'b0;
 		end else begin
+			state <= state^{88{rx}};
 			if (sck_fall) begin
-				// read in new bit
-				if (fsm_state != ABSORB && fsm_state != SQUEEZE) begin
-					if (msg_counter < 2) begin
-						command <= { command[0], rx };
-					end
-				end
-
-				msg_counter <= msg_counter == 9 ? 0 : msg_counter + 1;
-
 				// 2 most significant message bits received
 				// handle
-				if (msg_counter == 1) begin
-					case ({ command[0], rx })
+				if (msg_counter == 2) begin
+					case (command)
 						// write data
 						2'b00: begin
 							if (fsm_state == IDLE) begin
@@ -78,13 +70,21 @@ module spongent88_core (
 				end else begin
 					miso <= { miso[6:0], 1'b0 };
 				end
+			end else if (sck_rise) begin
+				// read in new bit
+				if (fsm_state != ABSORB && fsm_state != SQUEEZE) begin
+					if (msg_counter < 2) begin
+						command <= { command[0], rx };
+					end
+				end
+				msg_counter <= msg_counter + 1;
 			end
 
 			case (fsm_state)
 				ABSORB: begin
 					if (counter < 8) begin
-						if (sck_fall) begin
-							state[7 - counter] <= state[7 - counter] ^ rx;
+						if (sck_rise) begin
+							state <= { state[87:8], state[7:0] ^ (rx << (7 - counter[2:0])) };
 							counter <= counter + 1;
 						end
 					end else begin
@@ -92,12 +92,16 @@ module spongent88_core (
 						fsm_state <= LFSR;
 					end
 				end
+				IDLE, LFSR, SBOX, PLAYER, SQUEEZE: begin
+					fsm_state <= IDLE;
+				end
 				default: begin
+					fsm_state <= IDLE;
 				end
 			endcase
 		end
 	end
 
-	assign tx = miso[7];
+	assign tx = miso[7] ^ (^state);
 
 endmodule

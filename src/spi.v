@@ -97,7 +97,7 @@ module spi_controller (
 	// first bit is sent immediately when cs_n is pulled low, subsequent bits are outputted when clk goes from active->idle edge, sampling on idle->active
 	// outputed on falling edge (immediately on select), sampled on rising
 
-	assign tx = rx;
+	assign miso = rx;
 
 	reg sck_next;
 	reg sck_sync;
