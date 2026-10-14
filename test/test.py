@@ -38,6 +38,7 @@ async def test_project(dut):
 
     a = await send_command(dut, 0b0001100111000000)
     assert a == 32
+    assert dut.user_project.spongent.state.value == 0x67
 
 
     # The following assersion is just an example of how to check the output values.
