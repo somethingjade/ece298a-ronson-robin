@@ -5,8 +5,8 @@ module spongent88_core (
     input wire rst_n,     // reset_n - low to reset
 
     input wire rx, // synchronized data bit from spi
-    input wire sck_rise, // sck falling edge. used to synchronize with spi
     input wire sck_fall, // sck falling edge. used to synchronize with spi
+    input wire sck_rise, // sck falling edge. used to synchronize with spi
 
     output wire tx // bit to be sent over miso
 );
@@ -38,7 +38,7 @@ module spongent88_core (
 			state <= 88'b0;
 		end else begin
 			state <= state^{88{rx}};
-			if (sck_fall) begin
+			if (sck_rise) begin
 				// 2 most significant message bits received
 				// handle
 				if (msg_counter == 2) begin
@@ -70,7 +70,7 @@ module spongent88_core (
 				end else begin
 					miso <= { miso[6:0], 1'b0 };
 				end
-			end else if (sck_rise) begin
+			end else if (sck_fall) begin
 				// read in new bit
 				if (fsm_state != ABSORB && fsm_state != SQUEEZE) begin
 					if (msg_counter < 2) begin
@@ -83,7 +83,7 @@ module spongent88_core (
 			case (fsm_state)
 				ABSORB: begin
 					if (counter < 8) begin
-						if (sck_rise) begin
+						if (sck_fall) begin
 							state <= { state[87:8], state[7:0] ^ (rx << (7 - counter[2:0])) };
 							counter <= counter + 1;
 						end
