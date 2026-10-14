@@ -8,7 +8,9 @@ module spongent88_core (
     input wire sck_fall, // sck falling edge. used to synchronize with spi
     input wire sck_rise, // sck falling edge. used to synchronize with spi
 
-    output wire tx // bit to be sent over miso
+    output wire tx, // bit to be sent over miso
+    output wire tmp1,
+    output wire tmp2
 );
 
 	localparam IDLE = 3'b000;
@@ -18,7 +20,7 @@ module spongent88_core (
 	localparam PLAYER = 3'b100;
 	localparam SQUEEZE = 3'b101;
 
-	(* keep = "true", fsm_encoding = "none" *) reg [2:0] fsm_state;
+	(* keep = "true" *) reg [2:0] fsm_state;
 
 	(* keep = "true" *) reg [1:0] command;
 	(* keep = "true" *) reg [7:0] miso;
@@ -37,7 +39,7 @@ module spongent88_core (
 			counter <= 6'b0;
 			state <= 88'b0;
 		end else begin
-			state <= state^{88{rx}};
+			// state <= state^{88{rx}};
 			if (sck_rise) begin
 				// 2 most significant message bits received
 				// handle
@@ -47,6 +49,7 @@ module spongent88_core (
 						2'b00: begin
 							if (fsm_state == IDLE) begin
 								fsm_state <= ABSORB;
+								miso <= 8'b00100000;
 							end else begin
 								// error
 								miso <= 8'b11111111;
@@ -62,7 +65,7 @@ module spongent88_core (
 						end
 						// read status
 						2'b11: begin
-							miso <= (fsm_state == IDLE) ? 8'b00000000 : 8'b10000000;
+							miso <= (fsm_state == IDLE) ? 8'b00000001 : 8'b10000000;
 						end
 						default: begin
 						end
@@ -92,8 +95,10 @@ module spongent88_core (
 						fsm_state <= LFSR;
 					end
 				end
-				IDLE, LFSR, SBOX, PLAYER, SQUEEZE: begin
-					fsm_state <= IDLE;
+				IDLE: begin
+				end
+				LFSR, SBOX, PLAYER, SQUEEZE: begin
+					fsm_state <= LFSR;
 				end
 				default: begin
 					fsm_state <= IDLE;
@@ -102,6 +107,9 @@ module spongent88_core (
 		end
 	end
 
-	assign tx = miso[7] ^ (^state);
+	// assign tx = miso[7] ^ (^state);
+	assign tx = miso[7];
+	assign tmp1 = state[87];
+	assign tmp2 = fsm_state[2];
 
 endmodule
