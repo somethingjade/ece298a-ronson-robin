@@ -8,9 +8,7 @@ module spongent88_core (
     input wire sck_fall, // sck falling edge. used to synchronize with spi
     input wire sck_rise, // sck falling edge. used to synchronize with spi
 
-    output wire tx, // bit to be sent over miso
-    output wire tmp1,
-    output wire tmp2
+    output wire tx // bit to be sent over miso
 );
 
 	localparam IDLE = 3'b000;
