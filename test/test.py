@@ -6,6 +6,28 @@ from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, RisingEdge, FallingEdge
 
 
+async def send_command(dut, command):
+    RISE = 0b00000010
+    FALL = 0b00000001
+    LOW_CYCLES = 4
+    HIGH_CYCLES = 4
+
+    ret = 0
+    await FallingEdge(dut.clk)
+    for i in range(16):
+        bit = (((command << i) & 0x8000) >> 12)
+        await ClockCycles(dut.clk, LOW_CYCLES)
+        dut.uio_in.value = (bit | RISE) & 0xFF
+        await ClockCycles(dut.clk, 1)
+        dut.uio_in.value = (bit | 0b00000000) & 0xFF
+        await ClockCycles(dut.clk, HIGH_CYCLES)
+        dut.uio_in.value = (bit | FALL) & 0xFF
+        await ClockCycles(dut.clk, 1)
+        dut.uio_in.value = (bit | 0b00000000) & 0xFF
+        ret = (ret << 1) | (int(dut.uio_out.value) >> 2 & 0x01)
+
+    return (ret >> 6) & 0xFF
+
 @cocotb.test()
 async def test_project(dut):
     dut._log.info("Start")
@@ -29,38 +51,40 @@ async def test_project(dut):
     # dut.ui_in.value = 20
     # dut.uio_in.value = 30
     
+    READY = 0b00000000
+    BUSY = 0b10000000
+
+    ABSORB_OK = 0b00000000
+    ABSORB_ERR = 0b11111111
 
     # Wait for one clock cycle to see the output values
     await ClockCycles(dut.clk, 1)
 
-    # a = await send_command(dut, 0b1100000000000000)
-    # assert a == 1
+    dut._log.info("")
+    dut._log.info(">>> Test: Status read (ready)")
+    received = await send_command(dut, 0b1100000111000000)
+    assert received == READY
+    dut._log.info(">>> PASSED: Status read (ready)")
 
     dut._log.info("")
-    dut._log.info(">>> Test status read: ready")
-    a = await send_command(dut, 0b1100000111000000)
-    assert a == 0b00000001
-    dut._log.info(">>> PASSED status read: ready")
+    dut._log.info(">>> Test: Absorb")
+    received = await send_command(dut, 0b0001100111000000)
+    assert received == ABSORB_OK
+    # assert dut.user_project.spongent.state.value == 0x67
+    dut._log.info(">>> PASSED: Absorb")
 
     dut._log.info("")
-    dut._log.info(">>> Test absorb")
-    a = await send_command(dut, 0b0001100111000000)
-    assert a == 32
-    assert dut.user_project.spongent.state.value == 0x67
-    dut._log.info(">>> PASSED absorb")
-
-    dut._log.info("")
-    dut._log.info(">>> Test status read: busy")
-    a = await send_command(dut, 0b1100000111000000)
-    assert a == 0b10000000
-    dut._log.info(">>> PASSED status read: busy")
+    dut._log.info(">>> Test: Status read (busy)")
+    received = await send_command(dut, 0b1100000111000000)
+    assert received == BUSY
+    dut._log.info(">>> PASSED: Status read (busy)")
 
 
     dut._log.info("")
-    dut._log.info(">>> Test write while busy")
-    a = await send_command(dut, 0b0001100110000000)
-    assert a == 0b11111111
-    dut._log.info(">>> PASSED write while busy")
+    dut._log.info(">>> Test: Write while busy")
+    received = await send_command(dut, 0b0001100110000000)
+    assert received == ABSORB_ERR
+    dut._log.info(">>> PASSED: Write while busy")
 
 
     # The following assersion is just an example of how to check the output values.
@@ -70,24 +94,4 @@ async def test_project(dut):
     # Keep testing the module by changing the input values, waiting for
     # one or more clock cycles, and asserting the expected output values.
 
-async def send_command(dut, command):
-    ret = 0
-    await FallingEdge(dut.clk)
-    for i in range(16):
-        bit = (((command << i) & 0x8000) >> 12)
-        await ClockCycles(dut.clk, 4)
-        dut.uio_in.value = (bit | 0b00000001) & 0xFF
-        await ClockCycles(dut.clk, 1)
-        # dut._log.info("i=%d, rx=%d, out=%d",
-        #       i,
-        #       int(dut.uio_in.value) >> 3 & 1,
-        #       int(dut.uio_out.value) >> 2 & 1)
-        dut.uio_in.value = (bit | 0b00000000) & 0xFF
-        await ClockCycles(dut.clk, 4)
-        dut.uio_in.value = (bit | 0b00000010) & 0xFF
-        await ClockCycles(dut.clk, 1)
-        dut.uio_in.value = (bit | 0b00000000) & 0xFF
-        ret = (ret << 1) | (int(dut.uio_out.value) >> 2 & 0x01)
-
-    return (ret >> 6) & 0xFF
         
