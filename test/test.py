@@ -36,9 +36,31 @@ async def test_project(dut):
     # a = await send_command(dut, 0b1100000000000000)
     # assert a == 1
 
+    dut._log.info("")
+    dut._log.info(">>> Test status read: ready")
+    a = await send_command(dut, 0b1100000111000000)
+    assert a == 0b00000001
+    dut._log.info(">>> PASSED status read: ready")
+
+    dut._log.info("")
+    dut._log.info(">>> Test absorb")
     a = await send_command(dut, 0b0001100111000000)
     assert a == 32
     assert dut.user_project.spongent.state.value == 0x67
+    dut._log.info(">>> PASSED absorb")
+
+    dut._log.info("")
+    dut._log.info(">>> Test status read: busy")
+    a = await send_command(dut, 0b1100000111000000)
+    assert a == 0b10000000
+    dut._log.info(">>> PASSED status read: busy")
+
+
+    dut._log.info("")
+    dut._log.info(">>> Test write while busy")
+    a = await send_command(dut, 0b0001100110000000)
+    assert a == 0b11111111
+    dut._log.info(">>> PASSED write while busy")
 
 
     # The following assersion is just an example of how to check the output values.
