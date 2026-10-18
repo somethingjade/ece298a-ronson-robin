@@ -18,44 +18,20 @@ module tt_um_spongent88_top (
 	wire rx, sck_fall, tx;
 	wire miso;
 
-	wire tmp1, tmp2;
-
-	// spi_controller spi (
-	// 	.clk(clk),
-	// 	.rst_n(rst_n),
-	// 	.cs_n(uio_in[0]),
-	// 	.mosi(uio_in[1]),
-	// 	.miso(miso),
-	// 	.sck(uio_in[3]),
-	// 	.rx(rx),
-	// 	.sck_fall(sck_fall),
-	// 	.tx(tx)
-	// );
-	//
-	// spongent88_core spongent (
-	// 	.clk(clk),
-	// 	.rst_n(rst_n),
-	// 	.rx(rx),
-	// 	.sck_fall(sck_fall),
-	// 	.tx(tx)
-	// );
-	
 	spongent88_core spongent (
 		.clk(clk),
 		.rst_n(rst_n),
 		.rx(uio_in[3]),
 		.sck_fall(uio_in[0]),
 		.sck_rise(uio_in[1]),
-		.tx(miso),
-		.tmp1(tmp1),
-		.tmp2(tmp2)
+		.tx(miso)
 	);
 
   // All output pins must be assigned. If not used, assign to 0.
   // assign uo_out  = ui_in + uio_in;  // Example: ou_out is the sum of ui_in and uio_in
   assign uo_out = 0;
-  assign uio_out = { tmp2, tmp1, 3'b0, miso, 2'b0 };
-  assign uio_oe  = 8'b11000100;
+  assign uio_out = { 5'b0, miso, 2'b0 };
+  assign uio_oe  = 8'b00000100;
 
   // List all unused inputs to prevent warnings
   wire _unused = &{ena, ui_in[7:0], uio_in[7:4], uio_in[2], 1'b0};

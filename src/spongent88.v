@@ -49,7 +49,7 @@ module spongent88_core (
 						2'b00: begin
 							if (fsm_state == IDLE) begin
 								fsm_state <= ABSORB;
-								miso <= 8'b00100000;
+								miso <= 8'b00000000;
 							end else begin
 								// error
 								miso <= 8'b11111111;
@@ -65,7 +65,7 @@ module spongent88_core (
 						end
 						// read status
 						2'b11: begin
-							miso <= (fsm_state == IDLE) ? 8'b00000001 : 8'b10000000;
+							miso <= (fsm_state == IDLE) ? 8'b00000000 : 8'b10000000;
 						end
 						default: begin
 						end
@@ -107,9 +107,6 @@ module spongent88_core (
 		end
 	end
 
-	// assign tx = miso[7] ^ (^state);
 	assign tx = miso[7];
-	assign tmp1 = state[87];
-	assign tmp2 = fsm_state[2];
 
 endmodule
