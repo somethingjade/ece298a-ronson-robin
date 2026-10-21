@@ -37,7 +37,6 @@ module spongent88_core (
 			counter <= 6'b0;
 			state <= 88'b0;
 		end else begin
-			state <= state^{88{rx}};
 			if (sck_rise) begin
 				// 2 most significant message bits received
 				// handle
@@ -47,6 +46,7 @@ module spongent88_core (
 						2'b00: begin
 							if (fsm_state == IDLE) begin
 								fsm_state <= ABSORB;
+								miso <= 8'b00000000;
 							end else begin
 								// error
 								miso <= 8'b11111111;
@@ -62,7 +62,7 @@ module spongent88_core (
 						end
 						// read status
 						2'b11: begin
-							miso <= (fsm_state == IDLE) ? 8'b00000000 : 8'b10000000;
+							miso <= (fsm_state == IDLE) ? 8'b00000000 : 8'b00000001;
 						end
 						default: begin
 						end
@@ -92,8 +92,11 @@ module spongent88_core (
 						fsm_state <= LFSR;
 					end
 				end
-				IDLE, LFSR, SBOX, PLAYER, SQUEEZE: begin
-					fsm_state <= IDLE;
+				IDLE: begin
+
+				end
+				LFSR, SBOX, PLAYER, SQUEEZE: begin
+					fsm_state <= LFSR;
 				end
 				default: begin
 					fsm_state <= IDLE;
@@ -102,6 +105,6 @@ module spongent88_core (
 		end
 	end
 
-	assign tx = miso[7] ^ (^state);
+	assign tx = miso[7];
 
 endmodule
