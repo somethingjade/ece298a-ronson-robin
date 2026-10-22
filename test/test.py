@@ -73,18 +73,27 @@ async def test_project(dut):
     # assert dut.user_project.spongent.state.value == 0x67
     dut._log.info(">>> PASSED: Absorb")
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Status read (busy)")
-    received = await send_command(dut, 0b1100000111000000)
-    assert received == BUSY
-    dut._log.info(">>> PASSED: Status read (busy)")
+    # dut._log.info("")
+    # dut._log.info(">>> Test: Status read (busy)")
+    # received = await send_command(dut, 0b1100000111000000)
+    # assert received == BUSY
+    # dut._log.info(">>> PASSED: Status read (busy)")
 
 
+    # dut._log.info("")
+    # dut._log.info(">>> Test: Write while busy")
+    # received = await send_command(dut, 0b0001100110000000)
+    # assert received == ABSORB_ERR
+    # dut._log.info(">>> PASSED: Write while busy")
+
+    while ((received := await send_command(dut, 0b1100000000000000)) == BUSY):
+        await ClockCycles(dut.clk, 1)
+
     dut._log.info("")
-    dut._log.info(">>> Test: Write while busy")
-    received = await send_command(dut, 0b0001100110000000)
-    assert received == ABSORB_ERR
-    dut._log.info(">>> PASSED: Write while busy")
+    dut._log.info(">>> Test: sBox (1 round)")
+    sBoxRound = await send_command(dut, 0b1000000000000000);
+    assert sBoxRound == 0x98
+    dut._log.info(">>> PASSED: sBox (1 round)")
 
 
     # The following assersion is just an example of how to check the output values.

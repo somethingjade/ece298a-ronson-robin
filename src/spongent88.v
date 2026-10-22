@@ -97,7 +97,13 @@ module spongent88_core (
 						end
 						// read data
 						2'b10: begin
-							// TODO: implement
+							if (fsm_state == IDLE) begin
+								fsm_state <= SQUEEZE;
+								miso <= state[7:0];
+							end else begin
+								// error
+								miso <= 8'b11111111;
+							end
 						end
 						// read status
 						2'b11: begin
@@ -137,7 +143,7 @@ module spongent88_core (
 				LFSR: begin
 					state <= { state[87:82] ^ lfsr_reversed, state[81:6], state[5:0] ^ lfsr };
 					lfsr <= increment_lfsr(lfsr);
-					sbox_counter <= 5'b0;
+					sbox_counter <= 0;
 					fsm_state <= SBOX;
 				end
 				SBOX: begin
@@ -146,14 +152,17 @@ module spongent88_core (
 						state[i +: 4] <= sbox(state[i +: 4]);
 						if (sbox_counter == 21) begin
 							sbox_counter <= 0;
-							fsm_state <= PLAYER;
+							fsm_state <= IDLE;
 						end else begin
 							sbox_counter <= sbox_counter + 1;
 						end
 					end
 				end
-				PLAYER, SQUEEZE: begin
+				PLAYER: begin
 					fsm_state <= PLAYER;
+				end
+				SQUEEZE: begin
+					fsm_state <= SQUEEZE;
 				end
 				default: begin
 					fsm_state <= IDLE;
@@ -165,3 +174,7 @@ module spongent88_core (
 	assign tx = miso[7];
 
 endmodule
+
+
+
+
