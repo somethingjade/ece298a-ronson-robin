@@ -27,6 +27,15 @@ module spongent88_core (
 	(* keep = "true" *) reg [5:0] counter;
 
 	(* keep = "true" *) reg [87:0] state;
+	(* keep = "true" *) reg [5:0] lfsr;
+	(* keep = "true" *) wire [5:0] lfsr_reversed = { lfsr[0], lfsr[1], lfsr[2], lfsr[3], lfsr[4], lfsr[5] };
+
+	function [5:0] increment_lfsr;
+		input [5:0] lfsr;
+		begin
+			increment_lfsr = { lfsr[4:0], lfsr[5] ^ lfsr[4] };
+		end
+	endfunction
 
 	always @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
@@ -36,8 +45,8 @@ module spongent88_core (
 			msg_counter <= 4'b0;
 			counter <= 6'b0;
 			state <= 88'b0;
+			lfsr <= 6'b000101;
 		end else begin
-			// state <= state^{88{rx}};
 			if (sck_rise) begin
 				// 2 most significant message bits received
 				// handle
@@ -63,7 +72,7 @@ module spongent88_core (
 						end
 						// read status
 						2'b11: begin
-							miso <= (fsm_state == IDLE) ? 8'b00000000 : 8'b10000000;
+							miso <= (fsm_state == IDLE) ? 8'b00000000 : 8'b00000001;
 						end
 						default: begin
 						end
@@ -82,6 +91,8 @@ module spongent88_core (
 			end
 
 			case (fsm_state)
+				IDLE: begin
+				end
 				ABSORB: begin
 					if (counter < 8) begin
 						if (sck_fall) begin
@@ -90,13 +101,17 @@ module spongent88_core (
 						end
 					end else begin
 						counter <= 6'b0;
+						lfsr <= 6'b000101;
 						fsm_state <= LFSR;
 					end
 				end
-				IDLE: begin
+				LFSR: begin
+					state <= { state[87:82] ^ lfsr_reversed, state[81:6], state[5:0] ^ lfsr };
+					lfsr <= increment_lfsr(lfsr);
+					fsm_state <= SBOX;
 				end
-				LFSR, SBOX, PLAYER, SQUEEZE: begin
-					fsm_state <= LFSR;
+				SBOX, PLAYER, SQUEEZE: begin
+					fsm_state <= SBOX;
 				end
 				default: begin
 					fsm_state <= IDLE;

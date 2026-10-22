@@ -52,7 +52,7 @@ async def test_project(dut):
     # dut.uio_in.value = 30
     
     READY = 0b00000000
-    BUSY = 0b10000000
+    BUSY = 0b00000001
 
     ABSORB_OK = 0b00000000
     ABSORB_ERR = 0b11111111
@@ -68,7 +68,7 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: Absorb")
-    received = await send_command(dut, 0b0001100111000000)
+    received = await send_command(dut, 0b0011001111000000)
     assert received == ABSORB_OK
     # assert dut.user_project.spongent.state.value == 0x67
     dut._log.info(">>> PASSED: Absorb")
