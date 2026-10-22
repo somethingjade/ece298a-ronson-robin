@@ -18,6 +18,8 @@ module spongent88_core (
 	localparam PLAYER = 3'b100;
 	localparam SQUEEZE = 3'b101;
 
+	integer i;
+
 	(* keep = "true" *) reg [2:0] fsm_state;
 
 	(* keep = "true" *) reg [1:0] command;
@@ -25,6 +27,7 @@ module spongent88_core (
 
 	(* keep = "true" *) reg [3:0] msg_counter;
 	(* keep = "true" *) reg [5:0] counter;
+	(* keep = "true" *) reg [4:0] sbox_counter;
 
 	(* keep = "true" *) reg [87:0] state;
 	(* keep = "true" *) reg [5:0] lfsr;
@@ -37,6 +40,31 @@ module spongent88_core (
 		end
 	endfunction
 
+	function [3:0] sbox;
+		input [3:0] x;
+		begin
+			case (x)
+				4'h0: sbox = 4'hE;
+				4'h1: sbox = 4'hD;
+				4'h2: sbox = 4'hB;
+				4'h3: sbox = 4'h0;
+				4'h4: sbox = 4'h2;
+				4'h5: sbox = 4'h1;
+				4'h6: sbox = 4'h4;
+				4'h7: sbox = 4'hF;
+				4'h8: sbox = 4'h7;
+				4'h9: sbox = 4'hA;
+				4'hA: sbox = 4'h8;
+				4'hB: sbox = 4'h5;
+				4'hC: sbox = 4'h9;
+				4'hD: sbox = 4'hC;
+				4'hE: sbox = 4'h3;
+				4'hF: sbox = 4'h6;
+				default: sbox = 4'h0;
+			endcase
+		end
+	endfunction
+
 	always @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
 			fsm_state <= IDLE;
@@ -44,6 +72,7 @@ module spongent88_core (
 			miso <= 8'b0;
 			msg_counter <= 4'b0;
 			counter <= 6'b0;
+			sbox_counter <= 5'b0;
 			state <= 88'b0;
 			lfsr <= 6'b000101;
 		end else begin
@@ -108,10 +137,23 @@ module spongent88_core (
 				LFSR: begin
 					state <= { state[87:82] ^ lfsr_reversed, state[81:6], state[5:0] ^ lfsr };
 					lfsr <= increment_lfsr(lfsr);
+					sbox_counter <= 0;
 					fsm_state <= SBOX;
 				end
-				SBOX, PLAYER, SQUEEZE: begin
-					fsm_state <= SBOX;
+				SBOX: begin
+					if (sbox_counter < 22) begin
+						i = sbox_counter * 4;
+						state[i +: 4] <= sbox(state[i +: 4]);
+						if (sbox_counter == 21) begin
+							sbox_counter <= 0;
+							fsm_state <= PLAYER;
+						end else begin
+							sbox_counter <= sbox_counter + 1;
+						end
+					end
+				end
+				PLAYER, SQUEEZE: begin
+					fsm_state <= PLAYER;
 				end
 				default: begin
 					fsm_state <= IDLE;
