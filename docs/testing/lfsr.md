@@ -8,6 +8,8 @@ The Python implementation had to be slightly modified for the message to be abso
 
 The state, current LFSR, and new LFSR were compared and verified to be the same.
 
+The FSM state also transitions to the sBox state, encoded as `0b011`, as intended.
+
 cocotb waveform:
 ![GTKWave screenshot of SPONGENT-88 state](embed/lfsr_state_gtkwave.png)
 
