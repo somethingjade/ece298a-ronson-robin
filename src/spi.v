@@ -19,6 +19,8 @@ module spi_controller (
 
 	/*
 
+	--------------------- Design Considerations
+
 	Wikipedia says I need shift registers to receive and output
 	Recall that shift registers are a bunch of flipflops lined up that pipelines bits down to the next flipflop per clock cycle
 	As SPI MOSI and MISO can only send 1 bit per clock cycle each, if we want to store values after multiple cycles, we need to use shift registers
@@ -89,13 +91,19 @@ module spi_controller (
 	If the SPI clock recieves a synchronization chain, the MOSI line must also have the same synchronization chain to ensure that the time delay for both lines are the same.
 	This may be a larger problem if the chip clock is running significantly faster than the SPI clock (since the sync chain would be clocked by the chip clock, not the SPI clock)
 
+	--------------------- Other
+
+	Let's consider using SPI mode 0, meaning sck is considered idle when at a logic low, the first bit is outputed immediately when cs_N is pulled low, then every subsequent bits are outputed on
+	the falling edge of the clock, and sampled on the rising edge of the clock. There is a non-arbitrary time delay between when cs_n is pulled low and the first falling edge of the clock. As such,
+	our system needs output on both cs_n and the falling edge of the clock, while also keeping track of which bit to send. 
+	
+	It would simpler to only track the clock edge to output bits, and just have cs_n be a condition that needs to be fulfilled combinationally.
+	It would make more sense for us to consider SPI mode 1, which is output on rising edge of clock only, sample on falling edge, both of which only happen after cs_n has pulled low.
+	The first bit outputed happens on the first rising edge of the clock. Clock is still considered idle at a logic low.
+
 	
 	*/
 
-	// SPI mode 0 requires the following 
-	// sck is idle at 0
-	// first bit is sent immediately when cs_n is pulled low, subsequent bits are outputted when clk goes from active->idle edge, sampling on idle->active
-	// outputed on falling edge (immediately on select), sampled on rising
 
 	assign miso = rx;
 
@@ -104,6 +112,7 @@ module spi_controller (
 
 	reg mosi_next;
 	reg mosi_sync;
+	reg error_mask; // This register is used to mask the output if an error has appeared in the SPI module
 
 	// Defining combinational behavior
 	
@@ -115,33 +124,72 @@ module spi_controller (
 	always @(posedge clk or negedge rst_n or negedge cs_n) begin
 		if (!rst_n) begin
 			// I can foresee issues with this implementation. What if during reboot, clock is actually
-			// high, then you would get a rising edge immediately since sck_next reads in sck
-			sck_next <= 0; // in SPI mode 0, the clock is idle when low
+			// high, then you would get a rising edge (since registers are set to 0 initially) immediately since sck_next reads in sck
+			// But also note that the specs for SPI mode 1 indicate clock is idle at a voltage low, so this scenario should never happen.
+			// However, supposing that the possiblity is there, I can't design an error handler for it since it requires that you check the 
+			// the value of sck (and not the sck_next and sck_sync registerss) immediately following cs_n pulling low, and that requires using
+			// a register to keep track of the boolean status that this is the first time you're checking sck (as not using a boolean variable)
+			// forces the system to check sck every internal clk cycle, thus failing all valid values
+			sck_next <= 0; // in SPI mode 1, the clock is idle when low
 			sck_sync <= 0;
 			mosi_next <= 0;
 			mosi_sync <= 0;
+			error_mask <= 0;
 		end else begin // If in normal operation
-			if (!cs_n) begin // MOSI only read if chip select
-				// Conceptually, we sample on rising edge, but tx is assigned to mosi_sync, and mosi_sync
-				// is always being updated every clock cycle. Thus, as long as sck_rise is true, any module
-				// can sample the current tx and get the value at the right time, rather than the SPI module
-				// managing the internal timing. While not considered OOP design, this reduces complexity of other modules
-				// handling timing of data transfer to and from the SPI module. As such, SPI just becomes an interface
+			if (!cs_n) begin // MOSI only read if chip select low
+				// Conceptually, we sample on the falling edge of sck, but tx is assigned to mosi_sync, and mosi_sync
+				// is always being updated every interal clock cycle. Thus, as long as sck_fall is true, any external module
+				// can sample the current tx and get the value at the right time instance, rather than the SPI module
+				// managing the internal timing and bit storage using a shift register. While not considered OOP design, this reduces complexity of other modules
+				// handling data transfer to and from the SPI module's shift register. As such, SPI just becomes an interface with no shift register of its own
+				
+
+				// SPI clock only starts after cs_n, this part always runs
+				// Consider, what if cs_n pulls high? The values of _next and _sync freeze, which
+				// could potentially make sck_rise or sck_fall always true, forcing external modules dependent on these signals to keep being activated
+				// However, such a scenario should never happen as sck is supposed to remain idle for a period of time before cs_n pulls up (i.e after the last rising edge 
+				// that sends the final data bit, it falls and remains a logic low all while cs_n is still pulled low).
+				// While mosi_next and mosi_sync is non-deterministic after cs_n, sck_next and sck_sync should be in a known state (low).
+				// Else, we should consider this a bug in the system, or from the host side. Instead of resetting all the registers to 0 when cs_n is high,
+				// I'd rather have them take on a value that represents an error ????
+				sck_sync <= sck_next;
+				sck_next <= sck;
+				
 				mosi_sync <= mosi_next;
 				mosi_next <= mosi;
-			end
 
-			// SPI clock always tracked independent of cs_n
-			sck_sync <= sck_next;
-			sck_next <= sck;
-			
+
+			end else begin
+				if (sck_next | sck_sync) begin // if either values is 1, then the system has entered a bad state
+					error_mask <= 1;
+				end
+			end
 		end
 	end
 
-	// Questions to be answered
-	// Who is keeping track of 16 total bits?
-	// How do we know when the next message is coming?
-	// How does the host know when to send the next message (after the 45 rounds?)
-	// How does SPI know when to send output, and how will host know output is ready?
+	/*
+	-------------- Questions --------------
+	Who is keeping track of 16 total bits?
+		If I assume the spongent core deals with the bits, then it would be that 10 bits enter, the 2 MSB act as control for write data, write control, read data, read status, and then the next 8 are XOR'ed into status reg
+		In this scenario, it is entirely possible to just ingore the rest of the 6 padding bits, so the "end" of the message is arbitrary
+		Also, it seems like host will stop toggling clock all together once the message is done. Does spi clock start after cs_n?
 
+	How do we know when the next message is coming?
+		In this case, we could depend on cs_n being pulled down, so this means that every message, the cs_n line drops low and then pulls high once the message is over
+		But this creates more questions, such as if we were to output to host, we would need cs_n pulled low, and we would have to write back in a certain amount of time. How will the host know when we are done writing back?
+	
+	How does the host know when to send the next message (after the 45 rounds?)
+		Imagine that we depend on cs_n externally to send a message. We can probably have the host poll the status of the spongent core using the 2 ctrl bits, i.e. read status
+		Suppose host requests to read status. If not ready, the returning 8 bits represent busy.
+		If ready, then the host would pull cs_n high, then low again to send a data message. Actually, we can probably implement it the following way:
+			control[9:8] data[7:0], imagine that the host message is 32 bits, so it needs to send 4 x 8 messages of data
+			The first message was successful, 8 bits sent and spongent core becomes busy, returns 8 bits with errno 0 indicating a success
+			The host tries to write another 8 bits, but since core is busy, the return output is an errno that represents busy
+			The host keeps trying until the output by the core is a 0
+			Once all 32 bits are fed in and 0 is returned, the host keeps inquiring status?
+				but inquiring status is slow, you need to send 16 total bits only to read 2 of them by the core
+				Are we assuming that every time host reads back 8 bits, it needs to send 16 bits first? THen we send 11 messages to core to receive 11 messages back
+
+	How does SPI know when to send output, and how will host know output is ready?
+	*/
 endmodule

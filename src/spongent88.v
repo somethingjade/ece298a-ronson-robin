@@ -63,6 +63,9 @@ module spongent88_core (
 						// read status
 						2'b11: begin
 							miso <= (fsm_state == IDLE) ? 8'b00000000 : 8'b10000000;
+							// Why is miso only 8 bits long? We'll need more bits to indicate status
+							// Unless we're using the fact that command determines how to interpret miso?
+							// i.e. if read data, all 8 bits indicate state register, and if read status, all 8 bits represent status
 						end
 						default: begin
 						end
@@ -72,9 +75,13 @@ module spongent88_core (
 				end
 			end else if (sck_rise) begin
 				// read in new bit
-				if (fsm_state != ABSORB && fsm_state != SQUEEZE) begin
+				if (fsm_state != ABSORB && fsm_state != SQUEEZE) begin // Why not just put IDLE? Do we allow fsm transition during other states? 
+				// Ah I get it, because during the rest of the computation, the host may still want to inquire the system status, so as long as it's not
+				// absorbing or squeezing, 
 					if (msg_counter < 2) begin
-						command <= { command[0], rx };
+						command <= { command[0], rx }; // command[0] dictates read or write state. Who is writing to that?
+						// the if block triggers for the first two MSB of the message, but then the command always becomes write data, write control, and never read
+						// I'm assuming Ronson used command[0] for testing purposes
 					end
 				end
 				msg_counter <= msg_counter + 1;
@@ -102,6 +109,7 @@ module spongent88_core (
 		end
 	end
 
-	assign tx = miso[7] ^ (^state);
+	assign tx = miso[7] ^ (^state); // Why are we XOR state
 
 endmodule
+ 

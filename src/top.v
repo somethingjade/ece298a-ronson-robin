@@ -25,9 +25,9 @@ module tt_um_spongent88_top (
 		.mosi(uio_in[1]),
 		.miso(miso),
 		.sck(uio_in[3]),
-		.rx(rx),
+		.rx(tx),
 		.sck_fall(sck_fall),
-		.tx(tx)
+		.tx(rx)
 	);
 
 	spongent88_core spongent (
