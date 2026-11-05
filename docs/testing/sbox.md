@@ -13,5 +13,5 @@ The FSM state also transitions to the pLayer state, encoded as `0b100`, as inten
 cocotb waveform:
 ![GTKWave screenshot of SPONGENT-88 state](embed/sbox_state_gtkwave.png)
 
-Python implementation:
+Python implementation:\
 ![Screenshot of Python test script run output](embed/sbox_state_python.png)
