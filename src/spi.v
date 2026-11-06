@@ -9,12 +9,14 @@ module spi_controller (
 	input wire mosi,
 	output wire miso,
 	input wire sck, // SPI clock
+	input start_write, // start the output
 
 	// these go to core
 	output wire tx,
 	output wire sck_fall,
 	output wire sck_rise,
-	input wire rx
+	input wire rx,
+	input wire error_status
 );
 
 	/*
@@ -105,14 +107,16 @@ module spi_controller (
 	*/
 
 
-	assign miso = rx;
+	assign miso = shift_registers[5]; // rx from external module
 
 	reg sck_next;
 	reg sck_sync;
 
 	reg mosi_next;
 	reg mosi_sync;
-	reg error_mask; // This register is used to mask the output if an error has appeared in the SPI module
+	reg error_mask[1:0]; // This register is used to mask the output if an error has appeared in either the spi module or the spongent core
+	reg shift_registers[5:0];
+	reg output_enable;
 
 	// Defining combinational behavior
 	
@@ -121,7 +125,12 @@ module spi_controller (
 	assign sck_fall = (!sck_next) & sck_sync;
 
 	// Defining sequential behavior
+
 	always @(posedge clk or negedge rst_n or negedge cs_n) begin
+		error_mask[1] <= error_status;
+		output_enable <= start_write; // y
+		
+
 		if (!rst_n) begin
 			// I can foresee issues with this implementation. What if during reboot, clock is actually
 			// high, then you would get a rising edge (since registers are set to 0 initially) immediately since sck_next reads in sck
@@ -134,7 +143,9 @@ module spi_controller (
 			sck_sync <= 0;
 			mosi_next <= 0;
 			mosi_sync <= 0;
-			error_mask <= 0;
+			error_mask[1:0] <= 2'b0;
+			output_enable = 0;
+			shift_registers[5:0] <= 6'b0;
 		end else begin // If in normal operation
 			if (!cs_n) begin // MOSI only read if chip select low
 				// Conceptually, we sample on the falling edge of sck, but tx is assigned to mosi_sync, and mosi_sync
@@ -158,11 +169,43 @@ module spi_controller (
 				mosi_sync <= mosi_next;
 				mosi_next <= mosi;
 
+				// Regarding output, is SPI module responsible for managing the timing and data sent to the host?
+				// i.e. let's assume that host and device are both writing and reading at the same time, meaning device follows SPI mode 1 after cs_N
+				// However, our device can't provide data immediately as we need to know the control bits (and thus the finite state macine) first, so 
+				// only a part of the returning output is actually valid to read by the host. Which bits should those be? Is the size of data being set
+
+
+				// OUTPUT DESIGN
+				// According to the design of the spongent module, it samples from the spi module on a rising edge, and outputs on a falling edge
+				// Granted, the first two MSB of data received from the host represents control bits and thus 1/4 of the possible states in the FSM 
+				// the system can take on. As such, when the system reads the ctrl bits and realizes it needs to send data back to host, it will send 
+				// the first bit of data immediately on the third sck rising edge (based on testing, the system is ready for output immediately after
+				// reading the second ctrl bit). Consider the exapmle below
+				// INPUT:  1000 0000 01-- ---- (ctrl: 10, data: 0000 0001, padding: -- ----)
+				// OUTPUT: --00 1010 11-- ---- (data: 0010 1011, all "-" are considered padding)
+				// The issue above is that the host may only be able to receive data in bytes, meaning while the device meant to send 0010 1011, the host will
+				// receive --00 1010, 11-- ---- as two seperate bytes, and then the host would need to perform some kind of byte-alignment translation (bit shifting)
+
+				// It would be better if we differentiated the first byte as something like a crc, or error status, and the second byte to be just data.
+				// To do this, we'll shift the actual data by 6 sck cycles using a shift register
+				if (output_enable) begin
+					if (sck_rise) begin
+						shift_registers[5] <= shift_registers[4];
+						shift_registers[4] <= shift_registers[3];
+						shift_registers[3] <= shift_registers[2];
+						shift_registers[2] <= shift_registers[1];
+						shift_registers[1] <= shift_registers[0];
+						shift_registers[0] <= rx;
+					end
+				end
 
 			end else begin
 				if (sck_next | sck_sync) begin // if either values is 1, then the system has entered a bad state
-					error_mask <= 1;
+					error_mask[0] <= 1;
 				end
+				shift_registers[5:2] <= 4'b0; // clear shift register
+				shift_registers[0] <= error_mask[0];
+				shift_registers[1] <= error_mask[1];
 			end
 		end
 	end

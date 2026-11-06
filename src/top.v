@@ -17,6 +17,9 @@ module tt_um_spongent88_top (
 );
 	wire rx, sck_fall, tx;
 	wire miso;
+	wire out_en;
+	wire start_write;
+	wire error_status;
 
 	spi_controller spi (
 		.clk(clk),
@@ -27,7 +30,9 @@ module tt_um_spongent88_top (
 		.sck(uio_in[3]),
 		.rx(tx),
 		.sck_fall(sck_fall),
-		.tx(rx)
+		.tx(rx),
+		.start_write(start_write),
+		.error_status(error_status)
 	);
 
 	spongent88_core spongent (
@@ -35,14 +40,17 @@ module tt_um_spongent88_top (
 		.rst_n(rst_n),
 		.rx(rx),
 		.sck_fall(sck_fall),
-		.tx(tx)
+		.tx(tx),
+		.start_write(start_write), // should be set when FSM enters read_data state
+		.error_status(error_status)
 	);
 
   // All output pins must be assigned. If not used, assign to 0.
   // assign uo_out  = ui_in + uio_in;  // Example: ou_out is the sum of ui_in and uio_in
+  assign out_en = !uio_in[0];
   assign uo_out = 0;
   assign uio_out = { 5'b0, miso, 2'b0 };
-  assign uio_oe  = 8'b00000100;
+  assign uio_oe  = {5'b0, out_en, 2'b0};
 
   // List all unused inputs to prevent warnings
   wire _unused = &{ena, ui_in[7:0], uio_in[7:4], uio_in[2], 1'b0};
