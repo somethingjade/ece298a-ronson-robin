@@ -22,6 +22,10 @@ module tb ();
   wire [7:0] uo_out;
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
+  wire spi_sclk = uio_in[0];
+  wire spi_mosi = uio_in[1];
+  wire spi_cs   = uio_in[3];
+  wire spi_miso = uio_out[2];
 `ifdef GL_TEST
   wire VPWR = 1'b1;
   wire VGND = 1'b0;
@@ -45,5 +49,4 @@ module tb ();
       .clk    (clk),      // clock
       .rst_n  (rst_n)     // not reset
   );
-
 endmodule
