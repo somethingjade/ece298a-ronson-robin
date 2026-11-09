@@ -41,7 +41,7 @@ async def test_project(dut):
     spi_master = SpiMaster(spi_bus, spi_config)
 
     # 6. Perform a Full-Duplex Transfer
-    tx_data = [0x00, 0x40, 0x80, 0xc0]
+    tx_data = [0x0000, 0x4000, 0x8000, 0xc000]
     dut._log.info(f"{' '.join(f'{num:b}' for num in tx_data)}")
     
     # This coroutine blocks until the entire SPI transaction finishes

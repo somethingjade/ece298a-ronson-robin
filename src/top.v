@@ -15,7 +15,7 @@ module tt_um_spongent88_top (
     input  wire       clk,      // clock
     input  wire       rst_n     // reset_n - low to reset
 );
-	wire rx, sck_fall, tx;
+	wire rx, sck_fall, sck_rise, tx;
 	wire miso;
 	wire out_en;
 	wire start_write;
@@ -30,16 +30,18 @@ module tt_um_spongent88_top (
 		.sck(uio_in[3]),
 		.rx(tx),
 		.sck_fall(sck_fall),
+		.sck_rise(sck_rise),
 		.tx(rx),
 		.start_write(start_write),
 		.error_status(error_status)
 	);
 
-	spongent88_core spongent (
+	spi_test spongent (
 		.clk(clk),
 		.rst_n(rst_n),
 		.rx(rx),
 		.sck_fall(sck_fall),
+		.sck_rise(sck_rise),
 		.tx(tx),
 		.start_write(start_write), // should be set when FSM enters read_data state
 		.error_status(error_status)

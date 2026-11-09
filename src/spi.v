@@ -107,20 +107,21 @@ module spi_controller (
 	*/
 
 
-	assign miso = shift_registers[5]; // rx from external module
+	
 
 	reg sck_next;
 	reg sck_sync;
 
 	reg mosi_next;
 	reg mosi_sync;
-	reg error_mask[1:0]; // This register is used to mask the output if an error has appeared in either the spi module or the spongent core
-	reg shift_registers[5:0];
+	reg [1:0] error_mask; // This register is used to mask the output if an error has appeared in either the spi module or the spongent core
+	reg [5:0] shift_registers;
 	reg output_enable;
 
 	// Defining combinational behavior
 	
 	assign tx = mosi_sync;
+	assign miso = shift_registers[5]; // rx from external module
 	assign sck_rise = (!sck_sync) & sck_next;
 	assign sck_fall = (!sck_next) & sck_sync;
 
@@ -188,14 +189,17 @@ module spi_controller (
 
 				// It would be better if we differentiated the first byte as something like a crc, or error status, and the second byte to be just data.
 				// To do this, we'll shift the actual data by 6 sck cycles using a shift register
+				
 				if (output_enable) begin
+					shift_registers[5] <= rx;
 					if (sck_rise) begin
-						shift_registers[5] <= shift_registers[4];
-						shift_registers[4] <= shift_registers[3];
-						shift_registers[3] <= shift_registers[2];
-						shift_registers[2] <= shift_registers[1];
-						shift_registers[1] <= shift_registers[0];
-						shift_registers[0] <= rx;
+						// shift_registers[5] <= shift_registers[4];
+						// shift_registers[4] <= shift_registers[3];
+						// shift_registers[3] <= shift_registers[2];
+						// shift_registers[2] <= shift_registers[1];
+						// shift_registers[1] <= shift_registers[0];
+						// shift_registers[0] <= rx;
+						
 					end
 				end
 
