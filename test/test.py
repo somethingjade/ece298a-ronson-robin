@@ -25,11 +25,11 @@ async def test_project(dut):
     # Matches your DUT's port names: sclk, mosi, miso, cs_n
     # 1. Define your custom wire mapping
 
-
     # 2. Pass your DUT and the mapping dictionary to SpiBus
     spi_bus = SpiBus.from_prefix(dut, prefix="spi")
     # 4. Configure the SPI Protocol (e.g., Mode 1: CPOL=0, CPHA=1)
     spi_config = SpiConfig(
+        sclk_freq=10000000,
         word_width=16,
         cpol=False,
         cpha=True,
@@ -42,10 +42,11 @@ async def test_project(dut):
 
     # 6. Perform a Full-Duplex Transfer
     tx_data = [0x00, 0x40, 0x80, 0xc0]
-    dut._log.info(f"Sending data: {tx_data}")
+    dut._log.info(f"{' '.join(f'{num:b}' for num in tx_data)}")
     
     # This coroutine blocks until the entire SPI transaction finishes
     spi_master.write_nowait(tx_data)
+
     await spi_master.wait()
     
     # 2. Read back the full-duplex response bytes from the receive buffer
@@ -54,7 +55,7 @@ async def test_project(dut):
     # print(f"Received data from Slave DUT: {list(rx_data)}")
     if (isinstance(rx_data, type(None))):
         assert False, "rx_data was none!"
-    print(f"Data: {list(rx_data)} ")
+    dut._log.info(f"{' '.join(f'{num:b}' for num in rx_data)}")
     
 
     # 7. Check if results match expectations
