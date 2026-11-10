@@ -17,27 +17,36 @@ module spi_test (
     reg [3:0] counter;
     reg [7:0] shift_registers;
     reg read_state;
+    reg error_reg;
 
     assign tx = output_reg;
     assign start_write = read_state;
-    assign error_status = 0;
+    assign error_status = error_reg;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             output_reg <= 0;
             input_reg <= 0;
-            counter[3:0] <= 4;
+            counter[3:0] <= 0;
             shift_registers[7:0] <= 8'b0;
             read_state <= 0;
+            error_reg <= 0;
         end
 
         if (sck_rise) begin
-            read_state <= 1;
+            
             counter <= counter + 1;
-            output_reg <= counter[2];
-
+            if (counter > 1) begin
+                read_state <= 1;
+                output_reg <= 1;
+            end 
+            if (counter == 15) begin
+                read_state <= 0;
+                counter <= 0;
+                output_reg <= 0;
+            end
         end
     end
 
-
+// 11111111 1111111111 1111111111 1111111111
 endmodule 

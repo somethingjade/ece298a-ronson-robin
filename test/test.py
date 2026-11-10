@@ -18,9 +18,11 @@ async def test_project(dut):
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 10)
+    await ClockCycles(dut.clk, 5)
     dut.rst_n.value = 1
-
+    
+    # THIS WAIT IS MANDATORY TO PREVENT CS_N FROM PULLING LOW WHILE RST_N IS LOW
+    await ClockCycles(dut.clk, 5)
     # 3. Map the SPI signals to the SpiBus object
     # Matches your DUT's port names: sclk, mosi, miso, cs_n
     # 1. Define your custom wire mapping
@@ -29,7 +31,7 @@ async def test_project(dut):
     spi_bus = SpiBus.from_prefix(dut, prefix="spi")
     # 4. Configure the SPI Protocol (e.g., Mode 1: CPOL=0, CPHA=1)
     spi_config = SpiConfig(
-        sclk_freq=10000000,
+        sclk_freq=25000000,
         word_width=16,
         cpol=False,
         cpha=True,
@@ -57,7 +59,15 @@ async def test_project(dut):
         assert False, "rx_data was none!"
     dut._log.info(f"{' '.join(f'{num:b}' for num in rx_data)}")
     
-
-    # 7. Check if results match expectations
-    assert rx_data[0] == 0x0000
+    assert rx_data[0] == 0x00FF
     assert rx_data[1] == 0x00FF
+    assert rx_data[2] == 0x00FF
+    assert rx_data[3] == 0x00FF
+    
+    await ClockCycles(dut.clk, 5)
+    tx_data = [0]
+    spi_master.write_nowait(tx_data)
+    await spi_master.wait()
+    rx_data = await spi_master.read()
+    print(f"{rx_data}")
+    assert rx_data[0] == 0x00FF
