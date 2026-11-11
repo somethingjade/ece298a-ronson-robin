@@ -22,17 +22,21 @@ module spi_controller (
 
 	// synchronization chain
 	reg sck_next;
-	reg sck_sync;
+	reg sck_prev;
+	reg sck_interface;
+	
 	reg mosi_next;
-	reg mosi_sync;
-	assign sck_rise = (!sck_sync) & sck_next;
-	assign sck_fall = (!sck_next) & sck_sync;
+	reg mosi_prev;
+	reg mosi_interface; // 
+
+	assign sck_rise = (!sck_prev) & sck_next;
+	assign sck_fall = (!sck_next) & sck_prev;
 
 	reg [1:0] error_mask; // This register is used to mask the miso output if an error has appeared in either the spi module or the spongent core
 	reg [5:0] shift_registers; // Used to delay the output coming from the spongent core to map all 8 bits outputed to the LSByte of the message frame
 	reg output_enable;	
 
-	assign tx = mosi_sync;
+	assign tx = mosi_prev;
 	assign miso = shift_registers[5]; 
 
 	always @(posedge clk or negedge rst_n or negedge cs_n or posedge cs_n) begin
@@ -41,18 +45,24 @@ module spi_controller (
 		
 		if (!rst_n) begin
 			sck_next <= 0; // in SPI mode 1, the clock is idle when low
-			sck_sync <= 0;
+			sck_prev <= 0;
+			sck_interface <= 0;
+
 			mosi_next <= 0;
-			mosi_sync <= 0;
+			mosi_prev <= 0;
+			mosi_interface <= 0;
+			
 			error_mask[1:0] <= 2'b0;
 			output_enable = 0;
 			shift_registers[5:0] <= 6'b0;
 		end else if (!cs_n) begin // MOSI only read if chip select low
-			sck_sync <= sck_next;
-			sck_next <= sck;
+			sck_prev <= sck_next;
+			sck_next <= sck_interface;
+			sck_interface <= sck;
 			
-			mosi_sync <= mosi_next;
-			mosi_next <= mosi;
+			mosi_prev <= mosi_next;
+			mosi_next <= mosi_interface;
+			mosi_interface <= mosi;
 
 			// Example of expected input and output
 			// INPUT:  1000 0000 01-- ---- (ctrl: 10, data: 0000 0001, padding: -- ----)
@@ -70,7 +80,7 @@ module spi_controller (
 			end
 
 		end else begin
-			if (sck_next | sck_sync) begin // if either values is 1, then the system has entered a bad state
+			if (sck_next | sck_prev) begin // if either values is 1, then the system has entered a bad state
 				error_mask[0] <= 1;
 			end
 			shift_registers[5:2] <= 4'b0; 

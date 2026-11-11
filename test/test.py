@@ -29,7 +29,7 @@ async def test_project(dut):
     
     # Configure the SPI Protocol (e.g., Mode 1: CPOL=0, CPHA=1)
     spi_config = SpiConfig(
-        sclk_freq=25000000, # Should be x4 slower than device clock, or says our requirements
+        sclk_freq=10000000, # Should be x5 slower than device clock, or says our requirements
         word_width=16,
         cpol=False,
         cpha=True,
