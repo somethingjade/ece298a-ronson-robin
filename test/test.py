@@ -40,38 +40,107 @@ async def test_project(dut):
     
     # Allow CS_N to settle after reset
     await ClockCycles(dut.clk, 5)
-    
-    # First transaction
-    tx_data = [0x0000, 0x4000, 0x8000, 0xC6B0]
 
+    # I've temporarily set these to weird numbers for testing purposes
+    READY = 0b10000001
+    BUSY = 0b00011010
+
+    ABSORB_OK = 0b01101001
+    ABSORB_ERR = 0b10101010
+
+    EXPECTED_STATE_LSBYTE = 0x98 # from existing implementation
+
+    dut._log.info("")
+    dut._log.info(">>> Test: Status read (ready)")
+    tx_data = [0xCDEF] # only msbyte 0xc is important here
     dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    assert rx_data[0] == READY
+    dut._log.info(">>> PASSED: Status read (ready)")
+
+    dut._log.info("")
+    dut._log.info(">>> Test: Absorb + status read (busy) + write while busy")
+    tx_data = [0b0011001111000000, 0b1100000111000000, 0b0001100110000000]
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 3
+    assert rx_data[0] == ABSORB_OK
+    dut._log.info(">>> PASSED: Absorb")
+    assert rx_data[1] == BUSY
+    dut._log.info(">>> PASSED: Status read (busy)")
+    assert rx_data[2] == ABSORB_ERR
+    dut._log.info(">>> PASSED: Write while busy")
+    
+    dut._log.info("")
+    dut._log.info("Waiting 100 clock cycles")
+    await ClockCycles(dut.clk, 100)
+
+    dut._log.info("")
+    dut._log.info(">>> Test: Least significant byte of SPONGENT-88 state")
+    tx_data = [0x8671] # only msb 0x8 is important here
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    assert rx_data[0] == EXPECTED_STATE_LSBYTE
+    dut._log.info(">>> PASSED: Least significant byte of SPONGENT-88 state")
+
 
     # Blocking write: waits until all words have transmitted
-    await spi_master.write(tx_data)
 
     # Retrieve received words
-    rx_data = await spi_master.read()
 
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-
-    assert len(rx_data) == 4
-    assert rx_data[0] == 0x0000
-    assert rx_data[1] == 0x0000
-    assert rx_data[2] == 0x00FF
-    assert rx_data[3] == ((tx_data[3] & 0x3FFF) >> 6)
-
-    # Second transaction after CS_N has been idle
-    await ClockCycles(dut.clk, 5)
-
-    tx_data = [(0x03A3) << 6]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-
-    assert len(rx_data) == 1
-    assert isinstance(rx_data, list)
-    assert rx_data[0] == ((tx_data[0] & 0x3FFF) >> 6)
+    # # Second transaction after CS_N has been idle
+    # await ClockCycles(dut.clk, 5)
+    #
+    # tx_data = [(0x03A3) << 6]
+    # dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    # await spi_master.write(tx_data)
+    # rx_data = await spi_master.read()
+    #
+    # dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    #
+    # assert len(rx_data) == 1
+    # assert isinstance(rx_data, list)
+    # assert rx_data[0] == ((tx_data[0] & 0x3FFF) >> 6)
+    
+    # # First transaction
+    # tx_data = [0x0000, 0x4000, 0x8000, 0xC6B0]
+    #
+    # dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    #
+    # # Blocking write: waits until all words have transmitted
+    # await spi_master.write(tx_data)
+    #
+    # # Retrieve received words
+    # rx_data = await spi_master.read()
+    #
+    # dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    #
+    # assert len(rx_data) == 4
+    # assert rx_data[0] == 0x0000
+    # assert rx_data[1] == 0x0000
+    # assert rx_data[2] == 0x00FF
+    # assert rx_data[3] == ((tx_data[3] & 0x3FFF) >> 6)
+    #
+    # # Second transaction after CS_N has been idle
+    # await ClockCycles(dut.clk, 5)
+    #
+    # tx_data = [(0x03A3) << 6]
+    # dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    # await spi_master.write(tx_data)
+    # rx_data = await spi_master.read()
+    #
+    # dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    #
+    # assert len(rx_data) == 1
+    # assert isinstance(rx_data, list)
+    # assert rx_data[0] == ((tx_data[0] & 0x3FFF) >> 6)
     
     await ClockCycles(dut.clk, 20)

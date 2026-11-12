@@ -1,14 +1,16 @@
 `default_nettype none
 
 module spongent88_core (
-    input wire clk,      // clock
-    input wire rst_n,     // reset_n - low to reset
+	input wire clk,      // clock
+	input wire rst_n,     // reset_n - low to reset
 
-    input wire rx, // synchronized data bit from spi
-    input wire sck_fall, // sck falling edge. used to synchronize with spi
-    input wire sck_rise, // sck falling edge. used to synchronize with spi
+	input wire rx, // synchronized data bit from spi
+	input wire sck_fall, // sck falling edge. used to synchronize with spi
+	input wire sck_rise, // sck falling edge. used to synchronize with spi
 
-    output wire tx // bit to be sent over miso
+	output wire tx, // bit to be sent over miso
+	output wire error_status,// driven by spongent core if entered a bad state
+	output wire start_write // driven by spongent core indicating when to start output routine
 );
 
 	localparam IDLE = 3'b000;
@@ -20,18 +22,18 @@ module spongent88_core (
 
 	integer i;
 
-	(* keep = "true" *) reg [2:0] fsm_state;
+	reg [2:0] fsm_state;
 
-	(* keep = "true" *) reg [1:0] command;
-	(* keep = "true" *) reg [7:0] miso;
+	reg [1:0] command;
+	reg [7:0] miso;
 
-	(* keep = "true" *) reg [3:0] msg_counter;
-	(* keep = "true" *) reg [5:0] counter;
-	(* keep = "true" *) reg [4:0] sbox_counter;
+	reg [3:0] msg_counter;
+	reg [5:0] counter;
+	reg [4:0] sbox_counter;
 
-	(* keep = "true" *) reg [87:0] state;
-	(* keep = "true" *) reg [5:0] lfsr;
-	(* keep = "true" *) wire [5:0] lfsr_reversed = { lfsr[0], lfsr[1], lfsr[2], lfsr[3], lfsr[4], lfsr[5] };
+	reg [87:0] state;
+	reg [5:0] lfsr;
+	wire [5:0] lfsr_reversed = { lfsr[0], lfsr[1], lfsr[2], lfsr[3], lfsr[4], lfsr[5] };
 
 	function [5:0] increment_lfsr;
 		input [5:0] lfsr;
@@ -85,10 +87,16 @@ module spongent88_core (
 						2'b00: begin
 							if (fsm_state == IDLE) begin
 								fsm_state <= ABSORB;
-								miso <= 8'b00000000;
+								// temporarily
+								// making
+								// these
+								// weird for
+								// testing
+								// purposes
+								miso <= 8'b01101001;
 							end else begin
 								// error
-								miso <= 8'b11111111;
+								miso <= 8'b10101010;
 							end
 						end
 						// write control
@@ -97,11 +105,16 @@ module spongent88_core (
 						end
 						// read data
 						2'b10: begin
-							// TODO: implement
+							// should make sure
+							// hash is not in
+							// progress. for now,
+							// it's like this for
+							// testing.
+							miso <= state[7:0];
 						end
 						// read status
 						2'b11: begin
-							miso <= (fsm_state == IDLE) ? 8'b00000000 : 8'b00000001;
+							miso <= (fsm_state == IDLE) ? 8'b10000001 : 8'b00011010;
 						end
 						default: begin
 						end
@@ -167,6 +180,8 @@ module spongent88_core (
 	end
 
 	assign tx = miso[7];
+	assign error_status = 1'b0; // not using this rn
+	assign start_write = msg_counter >= 2 && msg_counter <= 10;
 
 endmodule
 
