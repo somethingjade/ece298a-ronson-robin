@@ -8,7 +8,7 @@ module tb ();
 
   // Dump the signals to a FST file. You can view it with gtkwave or surfer.
   initial begin
-    $dumpfile("tb.fst");
+    $dumpfile("tb.vcd");
     $dumpvars(0, tb);
     #1;
   end
@@ -22,13 +22,30 @@ module tb ();
   wire [7:0] uo_out;
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
+
+  // THE FOLLOWING SECTION WAS USED TO TEST SPI
+  // THE COCOTB-EXT SPI MODULE REQUIRES SIGNALS PREFIXED WITH "SPI"
+  // ----------------------------------------------
+  wire spi_sclk;
+  wire spi_mosi;
+  wire spi_cs;
+  wire spi_miso;
+
+  assign uio_in[0] = spi_cs;
+  assign uio_in[1] = spi_mosi;
+  assign spi_miso = uio_out[2];
+  assign uio_in[3] = spi_sclk;
+  assign uio_in[2] = 1'b0;
+  assign uio_in[7:4] = 4'b0000;
+  // ---------------------------------------------
+
 `ifdef GL_TEST
   wire VPWR = 1'b1;
   wire VGND = 1'b0;
 `endif
 
   // Replace tt_um_example with your module name:
-  tt_um_example user_project (
+  tt_um_spongent88_top user_project (
 
       // Include power ports for the Gate Level test:
 `ifdef GL_TEST

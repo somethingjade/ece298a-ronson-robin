@@ -9,11 +9,11 @@ You can also include images in this folder and reference them in the markdown. E
 
 ## How it works
 
-Explain how your project works
+Spi module: acts as an interface that feeds directly to spongent core
 
 ## How to test
 
-Explain how to use your project
+Uhhhhh no tests right now or something
 
 ## External hardware
 
