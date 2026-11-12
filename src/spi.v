@@ -39,7 +39,7 @@ module spi_controller (
 	assign tx = mosi_prev;
 	assign miso = shift_registers[5]; 
 
-	always @(posedge clk or posedge rst_n) begin
+	always @(posedge clk or negedge rst_n) begin
 		error_mask[1] <= error_status;
 		output_enable <= start_write;
 		
