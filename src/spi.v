@@ -53,7 +53,7 @@ module spi_controller (
 			mosi_interface <= 0;
 			
 			error_mask[1:0] <= 2'b0;
-			output_enable = 0;
+			output_enable <= 0;
 			shift_registers[5:0] <= 6'b0;
 		end else if (!cs_n) begin // MOSI only read if chip select low
 			sck_prev <= sck_next;

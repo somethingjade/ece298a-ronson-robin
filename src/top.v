@@ -21,7 +21,6 @@ module tt_um_spongent88_top (
 	wire sck_rise;
 	
 	wire miso;
-	wire out_en;
 	wire start_write;
 	wire error_status;
 

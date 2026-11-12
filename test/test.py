@@ -42,7 +42,7 @@ async def test_project(dut):
     await ClockCycles(dut.clk, 5)
     
     # First transaction
-    tx_data = [0x0000, 0x4000, 0x8000, 0xC000]
+    tx_data = [0x0000, 0x4000, 0x8000, 0xC6B0]
 
     dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
 
@@ -55,15 +55,21 @@ async def test_project(dut):
     dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
 
     assert len(rx_data) == 4
-    assert all(value == 0x00FF for value in rx_data)
+    assert rx_data[0] == 0x0000
+    assert rx_data[1] == 0x0000
+    assert rx_data[2] == 0x00FF
+    assert rx_data[3] == ((tx_data[3] & 0x3FFF) >> 6)
 
     # Second transaction after CS_N has been idle
     await ClockCycles(dut.clk, 5)
 
-    await spi_master.write([0x0000])
+    tx_data = [(0x03A3) << 6]
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
     rx_data = await spi_master.read()
 
-    dut._log.info(f"RX: {rx_data}")
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
 
     assert len(rx_data) == 1
-    assert rx_data[0] == 0x00FF
+    assert isinstance(rx_data, list)
+    assert rx_data[0] == ((tx_data[0] & 0x3FFF) >> 6)
