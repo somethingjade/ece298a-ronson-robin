@@ -77,6 +77,17 @@ module spongent88_core (
 		end
 	endfunction
 
+	function [6:0] P;
+		input [6:0] j; // maximum 88
+		begin
+			if (j == 87) begin
+				P = 87; // index = 87
+			end else begin
+				P = j*22 % 87; // index = j*22 % 87
+			end
+		end
+	endfunction
+
 	always @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
 			fsm_state <= IDLE;
@@ -208,6 +219,19 @@ module spongent88_core (
 						end
 					end
 					PLAYER: begin
+						reg[6:0] j;
+						for (j = 0; j < 87; j = j + 1) begin
+							state[P(j)] <= state[j];
+						end
+						// Why does this work?
+						// Verilog recognizes that this can be done in parallel using combinational all in the same clock
+
+						if (counter < 45) begin
+							fsm_state <= LFSR;
+							counter <= counter + 1; // Reuse counter to perform 45 rounds
+						end else begin
+							fsm_state <= SQUEEZE;
+						end
 						if (control_breakpoint != PLAYER) begin
 							fsm_state <= IDLE;
 						end
