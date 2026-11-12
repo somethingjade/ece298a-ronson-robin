@@ -157,7 +157,7 @@ module spongent88_core (
 				msg_counter <= msg_counter + 1;
 			end
 
-			if (msg_counter == 15 && control_reset) begin
+			if (msg_counter == 0 && control_reset) begin
 				fsm_state <= IDLE;
 				command <= 2'b0;
 				control <= 8'b0;

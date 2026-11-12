@@ -116,7 +116,7 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: Absorb + status read (busy) + write while busy")
-    tx_data = [0b0011001111000000, 0b1100000111000000, 0b0001100110000000]
+    tx_data = [generate_frame(WRITE_DATA, (0x67 << 1) | 0b1), generate_frame(READ_STATUS, 0), generate_frame(WRITE_DATA, (0x99 << 1) | 0b1 << 6)]
     dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
     rx_data = await spi_master.read()
@@ -198,11 +198,63 @@ async def test_project(dut):
     assert counter == 0
     dut._log.info(">>> PASSED: Control write (reset)")
 
-    # dut._log.info("")
-    # dut._log.info(">>> Test: State after reset")
-    # state = await read_entire_state(dut, spi_master)
-    # assert state == 0
-    # dut._log.info(">>> PASSED: State after reset")
+    dut._log.info("")
+    dut._log.info(">>> Test: State after reset")
+    state = await read_entire_state(dut, spi_master)
+    assert state == 0
+    dut._log.info(">>> PASSED: State after reset")
+
+    dut._log.info("")
+    dut._log.info(">>> Test: Status read (ready)")
+    tx_data = [generate_frame(READ_STATUS, 0x6767)]
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    error, busy, counter = decode_status(rx_data[0])
+    assert error == False
+    assert busy == False
+    assert counter == 0
+    dut._log.info(">>> PASSED: Status read (ready)")
+
+    dut._log.info("")
+    dut._log.info(">>> Test: Control write (breakpoint at pLayer for next test)")
+    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, PLAYER, 0))]
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    error, busy, counter = decode_status(rx_data[0])
+    assert error == False
+    assert busy == False
+    assert counter == 0
+    dut._log.info(">>> PASSED: Control write (breakpoint at pLayer for next test)")
+
+    dut._log.info("")
+    dut._log.info(">>> Test: Absorb again to make sure it didn't die after reset")
+    tx_data = [generate_frame(WRITE_DATA, (0x67 << 1) | 0b1)]
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    error, busy, counter = decode_status(rx_data[0])
+    assert error == False
+    assert busy == True
+    assert counter == 0
+    dut._log.info(">>> PASSED: Absorb again")
+
+    dut._log.info("")
+    dut._log.info("Waiting 100 clock cycles")
+    await ClockCycles(dut.clk, 100)
+
+    dut._log.info("")
+    dut._log.info(">>> Test: Entire SPONGENT-88 state")
+    state = await read_entire_state(dut, spi_master)
+    assert state == EXPECTED_STATE
+    dut._log.info(">>> PASSED: Entire SPONGENT-88 state")
 
 
     # Blocking write: waits until all words have transmitted
