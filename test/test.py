@@ -73,3 +73,5 @@ async def test_project(dut):
     assert len(rx_data) == 1
     assert isinstance(rx_data, list)
     assert rx_data[0] == ((tx_data[0] & 0x3FFF) >> 6)
+    
+    await ClockCycles(dut.clk, 20)
