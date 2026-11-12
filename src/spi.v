@@ -44,7 +44,7 @@ module spi_controller (
 		error_mask[1] <= error_status;
 		output_enable <= start_write;
 		
-		if (!rst_n) begin
+		if (!rst_n | cs_n) begin
 			sck_next <= 0; // in SPI mode 1, the clock is idle when low
 			sck_prev <= 0;
 			sck_interface <= 0;
@@ -57,17 +57,8 @@ module spi_controller (
 			output_enable <= 0;
 			shift_registers[5:0] <= 6'b0;
 			beginning_of_write <= 1;
-		end else if (cs_n) begin
-			error_mask[1:0] <= 2'b0;
-			shift_registers[5:0] <= 6'b0; 
-			beginning_of_write <= 1;
 		end else begin
 			if (!cs_n) begin // MOSI only read if chip select low
-				if (sck_next | sck_prev) begin // if either values is 1, then the system has entered a bad state
-					error_mask[0] <= 1;
-					// If this triggers before a write, the error will be masked into the current message frame
-					// If this triggers after a write, the host will only see an error the next time it reads
-				end
 				sck_prev <= sck_next;
 				sck_next <= sck_interface;
 				sck_interface <= sck;
