@@ -1,40 +1,77 @@
-# SPDX-FileCopyrightText: © 2024 Tiny Tapeout
-# SPDX-License-Identifier: Apache-2.0
 
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles
+from cocotbext.spi import SpiBus, SpiConfig, SpiMaster
 
 
 @cocotb.test()
 async def test_project(dut):
-    dut._log.info("Start")
 
-    # Set the clock period to 10 us (100 KHz)
-    clock = Clock(dut.clk, 10, unit="us")
-    cocotb.start_soon(clock.start())
+    # Start system clock
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
 
-    # Reset
+    # Reset DUT
     dut._log.info("Reset")
+
     dut.ena.value = 1
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 10)
+
+    await ClockCycles(dut.clk, 5)
     dut.rst_n.value = 1
 
-    dut._log.info("Test project behavior")
+    
 
-    # Set the input values you want to test
-    dut.ui_in.value = 20
-    dut.uio_in.value = 30
+    # Initialize SPI bus
+    spi_bus = SpiBus.from_prefix(dut, prefix="spi", cs_name="cs")
 
-    # Wait for one clock cycle to see the output values
-    await ClockCycles(dut.clk, 1)
+    spi_config = SpiConfig(
+        sclk_freq=10000000,
+        word_width=16,
+        cpol=False,
+        cpha=True,
+        msb_first=True,
+        cs_active_low=True
+    )
 
-    # The following assersion is just an example of how to check the output values.
-    # Change it to match the actual expected output of your module:
-    # assert dut.uo_out.value == 50
+    spi_master = SpiMaster(spi_bus, spi_config)
+    
+    # Allow CS_N to settle after reset
+    await ClockCycles(dut.clk, 5)
+    
+    # First transaction
+    tx_data = [0x0000, 0x4000, 0x8000, 0xC6B0]
 
-    # Keep testing the module by changing the input values, waiting for
-    # one or more clock cycles, and asserting the expected output values.
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+
+    # Blocking write: waits until all words have transmitted
+    await spi_master.write(tx_data)
+
+    # Retrieve received words
+    rx_data = await spi_master.read()
+
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+
+    assert len(rx_data) == 4
+    assert rx_data[0] == 0x0000
+    assert rx_data[1] == 0x0000
+    assert rx_data[2] == 0x00FF
+    assert rx_data[3] == ((tx_data[3] & 0x3FFF) >> 6)
+
+    # Second transaction after CS_N has been idle
+    await ClockCycles(dut.clk, 5)
+
+    tx_data = [(0x03A3) << 6]
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+
+    assert len(rx_data) == 1
+    assert isinstance(rx_data, list)
+    assert rx_data[0] == ((tx_data[0] & 0x3FFF) >> 6)
+    
+    await ClockCycles(dut.clk, 20)
