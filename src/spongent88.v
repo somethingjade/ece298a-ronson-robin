@@ -5,8 +5,8 @@ module spongent88_core (
     input wire rst_n,     // reset_n - low to reset
 
     input wire rx, // synchronized data bit from spi
-    input wire sck_rise, // sck falling edge. used to synchronize with spi
     input wire sck_fall, // sck falling edge. used to synchronize with spi
+    input wire sck_rise, // sck falling edge. used to synchronize with spi
 
     output wire tx // bit to be sent over miso
 );
@@ -18,15 +18,52 @@ module spongent88_core (
 	localparam PLAYER = 3'b100;
 	localparam SQUEEZE = 3'b101;
 
-	(* keep = "true", fsm_encoding = "none" *) reg [2:0] fsm_state;
+	integer i;
+
+	(* keep = "true" *) reg [2:0] fsm_state;
 
 	(* keep = "true" *) reg [1:0] command;
 	(* keep = "true" *) reg [7:0] miso;
 
 	(* keep = "true" *) reg [3:0] msg_counter;
 	(* keep = "true" *) reg [5:0] counter;
+	(* keep = "true" *) reg [4:0] sbox_counter;
 
 	(* keep = "true" *) reg [87:0] state;
+	(* keep = "true" *) reg [5:0] lfsr;
+	(* keep = "true" *) wire [5:0] lfsr_reversed = { lfsr[0], lfsr[1], lfsr[2], lfsr[3], lfsr[4], lfsr[5] };
+
+	function [5:0] increment_lfsr;
+		input [5:0] lfsr;
+		begin
+			increment_lfsr = { lfsr[4:0], lfsr[5] ^ lfsr[4] };
+		end
+	endfunction
+
+	function [3:0] sbox;
+		input [3:0] x;
+		begin
+			case (x)
+				4'h0: sbox = 4'hE;
+				4'h1: sbox = 4'hD;
+				4'h2: sbox = 4'hB;
+				4'h3: sbox = 4'h0;
+				4'h4: sbox = 4'h2;
+				4'h5: sbox = 4'h1;
+				4'h6: sbox = 4'h4;
+				4'h7: sbox = 4'hF;
+				4'h8: sbox = 4'h7;
+				4'h9: sbox = 4'hA;
+				4'hA: sbox = 4'h8;
+				4'hB: sbox = 4'h5;
+				4'hC: sbox = 4'h9;
+				4'hD: sbox = 4'hC;
+				4'hE: sbox = 4'h3;
+				4'hF: sbox = 4'h6;
+				default: sbox = 4'h0;
+			endcase
+		end
+	endfunction
 
 	always @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
@@ -35,10 +72,11 @@ module spongent88_core (
 			miso <= 8'b0;
 			msg_counter <= 4'b0;
 			counter <= 6'b0;
+			sbox_counter <= 5'b0;
 			state <= 88'b0;
+			lfsr <= 6'b000101;
 		end else begin
-			state <= state^{88{rx}};
-			if (sck_fall) begin
+			if (sck_rise) begin
 				// 2 most significant message bits received
 				// handle
 				if (msg_counter == 2) begin
@@ -47,6 +85,7 @@ module spongent88_core (
 						2'b00: begin
 							if (fsm_state == IDLE) begin
 								fsm_state <= ABSORB;
+								miso <= 8'b00000000;
 							end else begin
 								// error
 								miso <= 8'b11111111;
@@ -62,10 +101,7 @@ module spongent88_core (
 						end
 						// read status
 						2'b11: begin
-							miso <= (fsm_state == IDLE) ? 8'b00000000 : 8'b10000000;
-							// Why is miso only 8 bits long? We'll need more bits to indicate status
-							// Unless we're using the fact that command determines how to interpret miso?
-							// i.e. if read data, all 8 bits indicate state register, and if read status, all 8 bits represent status
+							miso <= (fsm_state == IDLE) ? 8'b00000000 : 8'b00000001;
 						end
 						default: begin
 						end
@@ -73,7 +109,7 @@ module spongent88_core (
 				end else begin
 					miso <= { miso[6:0], 1'b0 };
 				end
-			end else if (sck_rise) begin
+			end else if (sck_fall) begin
 				// read in new bit
 				if (fsm_state != ABSORB && fsm_state != SQUEEZE) begin // Why not just put IDLE? Do we allow fsm transition during other states? 
 				// Ah I get it, because during the rest of the computation, the host may still want to inquire the system status, so as long as it's not
@@ -88,19 +124,40 @@ module spongent88_core (
 			end
 
 			case (fsm_state)
+				IDLE: begin
+				end
 				ABSORB: begin
 					if (counter < 8) begin
-						if (sck_rise) begin
+						if (sck_fall) begin
 							state <= { state[87:8], state[7:0] ^ (rx << (7 - counter[2:0])) };
 							counter <= counter + 1;
 						end
 					end else begin
 						counter <= 6'b0;
+						lfsr <= 6'b000101;
 						fsm_state <= LFSR;
 					end
 				end
-				IDLE, LFSR, SBOX, PLAYER, SQUEEZE: begin
-					fsm_state <= IDLE;
+				LFSR: begin
+					state <= { state[87:82] ^ lfsr_reversed, state[81:6], state[5:0] ^ lfsr };
+					lfsr <= increment_lfsr(lfsr);
+					sbox_counter <= 0;
+					fsm_state <= SBOX;
+				end
+				SBOX: begin
+					if (sbox_counter < 22) begin
+						i = sbox_counter * 4;
+						state[i +: 4] <= sbox(state[i +: 4]);
+						if (sbox_counter == 21) begin
+							sbox_counter <= 0;
+							fsm_state <= PLAYER;
+						end else begin
+							sbox_counter <= sbox_counter + 1;
+						end
+					end
+				end
+				PLAYER, SQUEEZE: begin
+					fsm_state <= PLAYER;
 				end
 				default: begin
 					fsm_state <= IDLE;
@@ -109,7 +166,8 @@ module spongent88_core (
 		end
 	end
 
-	assign tx = miso[7] ^ (^state); // Why are we XOR state
+	assign tx = miso[7];
 
 endmodule
- 
+
+
