@@ -39,8 +39,9 @@ module spi_controller (
 
 	assign tx = mosi_prev;
 	assign miso = shift_registers[5]; 
+	wire async_reset = !rst_n || cs_n; // Since I reset state on two reset signals and GDS only allows one reset signal
 
-	always @(posedge clk or negedge rst_n or posedge cs_n) begin
+	always @(posedge clk or posedge async_reset) begin
 		error_mask[1] <= error_status;
 		output_enable <= start_write;
 		
