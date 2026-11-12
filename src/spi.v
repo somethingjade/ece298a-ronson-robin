@@ -35,11 +35,12 @@ module spi_controller (
 	reg [1:0] error_mask; // This register is used to mask the miso output if an error has appeared in either the spi module or the spongent core
 	reg [5:0] shift_registers; // Used to delay the output coming from the spongent core to map all 8 bits outputed to the LSByte of the message frame
 	reg output_enable;	
+	reg beginning_of_write; // For assigning the error mask to the data out
 
 	assign tx = mosi_prev;
 	assign miso = shift_registers[5]; 
 
-	always @(posedge clk or negedge rst_n or negedge cs_n or posedge cs_n) begin
+	always @(posedge clk or negedge rst_n or posedge cs_n) begin
 		error_mask[1] <= error_status;
 		output_enable <= start_write;
 		
@@ -55,37 +56,47 @@ module spi_controller (
 			error_mask[1:0] <= 2'b0;
 			output_enable <= 0;
 			shift_registers[5:0] <= 6'b0;
-		end else if (!cs_n) begin // MOSI only read if chip select low
-			sck_prev <= sck_next;
-			sck_next <= sck_interface;
-			sck_interface <= sck;
-			
-			mosi_prev <= mosi_next;
-			mosi_next <= mosi_interface;
-			mosi_interface <= mosi;
-
-			// Example of expected input and output
-			// INPUT:  1000 0000 01-- ---- (ctrl: 10, data: 0000 0001, padding: -- ----)
-			// OUTPUT: ---- --00 1010 1100 (err_stat: 00, data: 0010 1011, padding: ---- --)
-			
-			if (output_enable) begin // output_enable should only be on if host requests data or status
-				if (sck_rise) begin
-					shift_registers[5] <= shift_registers[4];
-					shift_registers[4] <= shift_registers[3];
-					shift_registers[3] <= shift_registers[2];
-					shift_registers[2] <= shift_registers[1];
-					shift_registers[1] <= shift_registers[0];
-					shift_registers[0] <= rx;
-				end
-			end
-
-		end else begin
+			beginning_of_write <= 1;
+		end else if (cs_n) begin
 			if (sck_next | sck_prev) begin // if either values is 1, then the system has entered a bad state
 				error_mask[0] <= 1;
 			end
-			shift_registers[5:2] <= 4'b0; 
-			shift_registers[0] <= error_mask[0]; // error values are tracked all the time when device is not communicating with host
-			shift_registers[1] <= error_mask[1];
+			shift_registers[5:0] <= 6'b0; 
+			beginning_of_write <= 1;
+		end else begin
+			if (!cs_n) begin // MOSI only read if chip select low
+				sck_prev <= sck_next;
+				sck_next <= sck_interface;
+				sck_interface <= sck;
+				
+				mosi_prev <= mosi_next;
+				mosi_next <= mosi_interface;
+				mosi_interface <= mosi;
+
+				// Example of expected input and output
+				// INPUT:  1000 0000 01-- ---- (ctrl: 10, data: 0000 0001, padding: -- ----)
+				// OUTPUT: ---- --00 1010 1100 (err_stat: 00, data: 0010 1011, padding: ---- --)
+				
+				if (output_enable) begin // output_enable should only be on if host requests data or status, and this is set on a falling edge!
+					if (beginning_of_write) begin
+						shift_registers[0] <= error_mask[0]; // error values are tracked all the time when device is not communicating with host
+						shift_registers[1] <= error_mask[1];
+						beginning_of_write <= 0;
+						// Won't shift_registers[0] be overwritten by rx later?
+						// No, because output_enable is driven on a falling edge, so the SR value is already clocked
+						// before sck_rise triggers! Of course, this depends on the assumption that spi clock is slower than device clock
+					end
+					if (sck_rise) begin
+						shift_registers[5] <= shift_registers[4];
+						shift_registers[4] <= shift_registers[3];
+						shift_registers[3] <= shift_registers[2];
+						shift_registers[2] <= shift_registers[1];
+						shift_registers[1] <= shift_registers[0];
+						shift_registers[0] <= rx;
+					end
+				end
+
+			end
 		end
 	end
 
