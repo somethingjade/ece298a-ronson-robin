@@ -36,6 +36,7 @@ module spongent88_core (
 	reg [3:0] msg_counter;
 	reg [5:0] counter;
 	reg [4:0] sbox_counter;
+	reg player_pause; // Used during breakpoint to prevent continuous repositioning
 
 	reg [87:0] state;
 	reg [5:0] lfsr;
@@ -97,6 +98,7 @@ module spongent88_core (
 			msg_counter <= 4'b0;
 			counter <= 6'b0;
 			sbox_counter <= 5'b0;
+			player_pause <= 0;
 			state <= 88'b0;
 			lfsr <= 6'b000101;
 		end else begin
@@ -209,32 +211,47 @@ module spongent88_core (
 							sbox_nibble = sbox_counter * 4;
 							state[sbox_nibble +: 4] <= sbox(state[sbox_nibble +: 4]);
 							if (sbox_counter == 21) begin
-								sbox_counter <= 0;
 								if (control_breakpoint != SBOX) begin
 									fsm_state <= PLAYER;
+									sbox_counter <= 0;
+								end else begin
+									sbox_counter <= sbox_counter + 1; // You need this line to stop sbox from continuously running
 								end
 							end else begin
 								sbox_counter <= sbox_counter + 1;
 							end
+						end else begin
+							if (control_breakpoint != SBOX) begin
+								fsm_state <= PLAYER;
+								sbox_counter <= 0;
+							end
+								// Do nothing
 						end
 					end
 					PLAYER: begin
-						reg[6:0] j;
-						for (j = 0; j < 87; j = j + 1) begin
-							state[P(j)] <= state[j];
-						end
-						// Why does this work?
-						// Verilog recognizes that this can be done in parallel using combinational all in the same clock
+						if (!player_pause) begin
+							reg[6:0] j;
+							for (j = 0; j < 87; j = j + 1) begin
+								state[P(j)] <= state[j];
+							end
+							// Why does this work?
+							// Verilog recognizes that this can be done in parallel using combinational all in the same clock
 
-						if (counter < 45) begin
-							fsm_state <= LFSR;
-							counter <= counter + 1; // Reuse counter to perform 45 rounds
-						end else begin
-							fsm_state <= IDLE;
-						end
+						end 
 						if (control_breakpoint != PLAYER) begin
-							fsm_state <= IDLE;
+							player_pause <= 0;
+							if (counter < 44) begin
+								fsm_state <= LFSR;
+								counter <= counter + 1; // Reuse counter to perform 45 rounds
+							end else begin
+								fsm_state <= IDLE;
+								counter <= 0;
+							end
+						end else begin
+							player_pause <= 1;
+							// Do nothing until breakpoint is released
 						end
+						
 					end
 					default: begin
 						fsm_state <= IDLE;
