@@ -230,7 +230,7 @@ module spongent88_core (
 							fsm_state <= LFSR;
 							counter <= counter + 1; // Reuse counter to perform 45 rounds
 						end else begin
-							fsm_state <= SQUEEZE;
+							fsm_state <= IDLE;
 						end
 						if (control_breakpoint != PLAYER) begin
 							fsm_state <= IDLE;
