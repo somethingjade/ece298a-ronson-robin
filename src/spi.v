@@ -34,14 +34,15 @@ module spi_controller (
 
 	reg [1:0] error_mask; // This register is used to mask the miso output if an error has appeared in either the spi module or the spongent core
 	reg [5:0] shift_registers; // Used to delay the output coming from the spongent core to map all 8 bits outputed to the LSByte of the message frame
-	reg output_enable;	
+	reg write_enable;	
+	reg rx_reg;
 
 	assign tx = mosi_prev;
 	assign miso = shift_registers[5]; 
 
 	always @(posedge clk or negedge rst_n) begin
 		error_mask[1] <= error_status;
-		output_enable <= start_write;
+		write_enable <= start_write;
 		
 		if (!rst_n) begin
 			sck_next <= 0; // in SPI mode 1, the clock is idle when low
@@ -53,8 +54,9 @@ module spi_controller (
 			mosi_interface <= 0;
 			
 			error_mask[1:0] <= 2'b0;
-			output_enable <= 0;
+			write_enable <= 0;
 			shift_registers[5:0] <= 6'b0;
+			rx_reg <= 0;
 		end else begin
 			if (!cs_n) begin // MOSI only read if chip select low
 				sck_prev <= sck_next;
@@ -69,14 +71,21 @@ module spi_controller (
 				// INPUT:  1000 0000 01-- ---- (ctrl: 10, data: 0000 0001, padding: -- ----)
 				// OUTPUT: ---- --00 1010 1100 (err_stat: 00, data: 0010 1011, padding: ---- --)
 				
-				if (output_enable) begin // output_enable should only be on if host requests data or status, and this is set on a falling edge!
+				if (write_enable || shift_registers != 0) begin // write_enable should only be on if host requests data or status, and this is set on a falling edge!
 					if (sck_rise) begin
-						shift_registers[5] <= shift_registers[4];
-						shift_registers[4] <= shift_registers[3];
-						shift_registers[3] <= shift_registers[2];
-						shift_registers[2] <= shift_registers[1];
-						shift_registers[1] <= shift_registers[0];
-						shift_registers[0] <= rx;
+						// sorry robin. this hurts to
+						// look at. im changing it
+						// - ronson
+						// shift_registers[5] <= shift_registers[4];
+						// shift_registers[4] <= shift_registers[3];
+						// shift_registers[3] <= shift_registers[2];
+						// shift_registers[2] <= shift_registers[1];
+						// shift_registers[1] <= shift_registers[0];
+						// shift_registers[0] <= rx;
+						shift_registers <= { shift_registers[4:0], rx_reg };
+					end else if (sck_fall) begin
+						// sample on fall
+						rx_reg <= rx;
 					end
 				end else begin
 					shift_registers[5:2] <= 4'b0;
