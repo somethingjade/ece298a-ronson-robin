@@ -92,6 +92,10 @@
             4. As done in test 3, read the entire state
     - Expected output:
         - Both implementations have identical states throughout
+        - Control register write outputs:
+            - `error == False`
+            - `busy == True`
+            - `counter == 0`
 9. Read counter
     - Purpose: Ensure the device correctly reports its counter
     - Procedure:
@@ -120,4 +124,39 @@
     - Expected output:
         - Both implementations have identical states
 12. Check control register reset
-    
+    - Purpose: Ensure the control register can be used to reset the device
+    - Procedure:
+        1. Write to control register:
+            - `read_byte = 0`
+            - `pause_at = IDLE`
+            - `reset = 1`
+        2. Send status read command
+    - Expected output:
+        - `error == False`
+        - `busy == False`
+        - `counter == 0`
+13. Read state after reset
+    - Purpose: Ensure the state is properly cleared after software reset
+    - Procedure:
+        1. As done in test 3, read all bytes of the state
+    - Expected output:
+        - All read bytes are 0
+14. Test hash with known test vector
+    - Purpose: Ensure the device can produce the correct hash for a known test vector
+    - Procedure:
+        1. Pad the known test vector with `0x80` in the least significant byte position
+            - This is described in \[1\]
+            - Test vector:
+                - String: "Sponge + Present = Spongent"
+                - Hex: 0x53706F6E6765202B2050726573656E74203D2053706F6E67656E74
+        2. Starting from the most significant byte:
+            - Busy-wait using the read status command for the device to be ready
+            - Write one byte at a time using the write data command
+        3. Repeat 11 times:
+            - Busy-wait using the read status command for the device to be ready
+            - Use the read data command to read the next byte of the digest (bytes will be read most significant byte first)
+        4. Confirm that the digest matches the expected value:
+            - Expected digest: 0x69971BF96DEF95BFC46822
+
+## References
+\[1\] A. Bogdanov, M. Knezevic, G. Leander, D. Toz, K. Varici, I. Verbauwhede, "SPONGENT: A Lightweight Hash Function," in CHES 2011, 2011, pp. 312-325, doi: https://doi.org/10.1007/978-3-642-23951-9_21.
