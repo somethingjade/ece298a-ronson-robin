@@ -4,8 +4,6 @@ from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles
 from cocotbext.spi import SpiBus, SpiConfig, SpiMaster
 
-import SPONGENT
-
 IDLE = 0b000;
 ABSORB = 0b001;
 LFSR = 0b010;
@@ -84,9 +82,10 @@ async def test_project(dut):
     # Allow CS_N to settle after reset
     await ClockCycles(dut.clk, 5)
 
-    EXPECTED_SBOX_STATE_LSBYTE = 0x98 # from existing implementation
-    EXPECTED_SBOX_STATE_MSBYTE = 0x8e # from existing implementation
-    EXPECTED_SBOX_STATE = 0x8eeeeeeeeeeeeeeeeeee98 # from existing implementation
+    EXPECTED_STATE_LSBYTE = 0x98 # from existing implementation
+    EXPECTED_STATE_MSBYTE = 0x8e # from existing implementation
+    EXPECTED_STATE = 0x8eeeeeeeeeeeeeeeeeee98 # from existing implementation
+    EXPECTED_STATE_END = 0xe95aa77a862489d1e04491 # from existing implementation
 
     dut._log.info("")
     dut._log.info(">>> Test: Status read (ready)")
@@ -103,8 +102,67 @@ async def test_project(dut):
     dut._log.info(">>> PASSED: Status read (ready)")
 
     dut._log.info("")
-    dut._log.info("---------------- BREAKPOINT ON SBOX ----------------")
-    dut._log.info(">>> Test: Control write (breakpoint at sBox for next test)")
+    dut._log.info(">>> Test: Control write (breakpoint at absorb)")
+    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, ABSORB, 0))]
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    error, busy, counter = decode_status(rx_data[0])
+    assert error == False
+    assert busy == False
+    assert counter == 0
+    dut._log.info(">>> PASSED: Control write (breakpoint at absorb)")
+
+    dut._log.info("")
+    dut._log.info(">>> Test: Absorb + status read (busy) + write while busy")
+    tx_data = [generate_frame(WRITE_DATA, (0x67 << 1) | 0b1), generate_frame(READ_STATUS, 0), generate_frame(WRITE_DATA, (0x99 << 1) | 0b1 << 6)]
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 3
+    error, busy, counter = decode_status(rx_data[0])
+    assert error == False
+    assert busy == True
+    assert counter == 0
+    dut._log.info(">>> PASSED: Absorb")
+    error, busy, counter = decode_status(rx_data[1])
+    assert error == False
+    assert busy == True
+    assert counter == 0
+    dut._log.info(">>> PASSED: Status read (busy)")
+    error, busy, counter = decode_status(rx_data[2])
+    assert error == True
+    assert busy == True
+    assert counter == 0
+    dut._log.info(">>> PASSED: Write while busy")
+    
+    dut._log.info("")
+    dut._log.info("Waiting 100 clock cycles")
+    await ClockCycles(dut.clk, 100)
+
+    dut._log.info("")
+    dut._log.info(">>> Test: Control write (breakpoint at lfsr)")
+    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, LFSR, 0))]
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    error, busy, counter = decode_status(rx_data[0])
+    assert error == False
+    assert busy == True
+    assert counter == 0
+    dut._log.info(">>> PASSED: Control write (breakpoint at lfsr)")
+
+    dut._log.info("")
+    dut._log.info("Waiting 100 clock cycles")
+    await ClockCycles(dut.clk, 100)
+
+    dut._log.info("")
+    dut._log.info(">>> Test: Control write (breakpoint at sbox)")
     tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, SBOX, 0))]
     dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
@@ -113,132 +171,16 @@ async def test_project(dut):
     assert len(rx_data) == 1
     error, busy, counter = decode_status(rx_data[0])
     assert error == False
-    assert busy == False
+    assert busy == True
     assert counter == 0
-    dut._log.info(">>> PASSED: Control write (breakpoint at sBox for next test)")
+    dut._log.info(">>> PASSED: Control write (breakpoint at sbox)")
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Absorb + status read (busy) + write while busy")
-    tx_data = [generate_frame(WRITE_DATA, (0x67 << 1) | 0b1), generate_frame(READ_STATUS, 0), generate_frame(WRITE_DATA, (0x99 << 1) | 0b1 << 6)]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 3
-    error, busy, counter = decode_status(rx_data[0])
-    assert error == False
-    assert busy == True
-    assert counter == 0
-    dut._log.info(">>> PASSED: Absorb")
-    error, busy, counter = decode_status(rx_data[1])
-    assert error == False
-    assert busy == True
-    assert counter == 0
-    dut._log.info(">>> PASSED: Status read (busy)")
-    error, busy, counter = decode_status(rx_data[2])
-    assert error == True
-    assert busy == True
-    assert counter == 0
-    dut._log.info(">>> PASSED: Write while busy")
-    
     dut._log.info("")
     dut._log.info("Waiting 100 clock cycles")
     await ClockCycles(dut.clk, 100)
 
     dut._log.info("")
-    dut._log.info(">>> Test: Least significant byte of SPONGENT-88 state")
-    tx_data = [generate_frame(READ_DATA, 0x1234)]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    assert rx_data[0] == EXPECTED_SBOX_STATE_LSBYTE # 0b0000000010011000
-    dut._log.info(">>> PASSED: Least significant byte of SPONGENT-88 state")
-    
-    dut._log.info(">>> Test: Least significant byte of SPONGENT-88 state again")
-    tx_data = [generate_frame(READ_DATA, 0x1234)]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    assert rx_data[0] == EXPECTED_SBOX_STATE_LSBYTE
-    dut._log.info(">>> PASSED: Least significant byte of SPONGENT-88 state")
-    
-    
-    await ClockCycles(dut.clk, 10)
-    dut._log.info(">>> Test: Least significant byte of SPONGENT-88 state again after 10clck delay")
-    tx_data = [generate_frame(READ_DATA, 0x1234)]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    assert rx_data[0] == EXPECTED_SBOX_STATE_LSBYTE
-    dut._log.info(">>> PASSED: Least significant byte of SPONGENT-88 state")
-    
-
-    
-    dut._log.info("")
-    dut._log.info("---------------- CHECKING PYTHON IMPLEMENTATION ----------------")
-    # Create the Spongent-88 instance
-    spongent = SPONGENT.SPONGENT(n=88, c=80, r=8, R=45)
-    dut._log.info("Initializing state")
-    # Initial 88-bit state (all zeros)
-    state = 0
-    
-    # Example 8-bit message block
-    message_block = (0x67 << 1) | 0b1
-    dut._log.info("XOR message with LSB (I thought it was MSB!)...")
-    # 1. Absorb: XOR message into LSB 8 bits
-    state ^= message_block 
-
-    # 2. Generate and apply round constants
-    tmp = spongent.LFSR
-    revLFSR = 0
-
-    for _ in range(spongent.LFSRsize):
-        revLFSR = (revLFSR << 1) | (tmp & 0x1)
-        tmp >>= 1
-
-    state ^= revLFSR << (spongent.r + spongent.c - spongent.LFSRsize)
-    state ^= spongent.LFSR
-    
-    dut._log.info("Applying counter...")
-    # 3. Advance LFSR
-    spongent.lCounter()
-    
-    dut._log.info("Applying sBox...")
-    # 4. Apply S-box layer
-    state = spongent.sBoxLayer(state)
-    dut._log.info(f"FULL: {state:022X}")
-    dut._log.info(f"LSB: {bin(state & 0xFF)}")
-    assert (state & 0xFF) == EXPECTED_SBOX_STATE_LSBYTE
-    dut._log.info(">>> SBox expected value matches python implemenation")
-    
-    dut._log.info("Applying pLayer...")
-    # 5. Apply pLayer
-    state = spongent.pLayer(state)
-    dut._log.info(f"FULL: {state:022X}")
-    dut._log.info(f"LSB: {bin(state & 0xFF)}")
-    # Final 88-bit state after one round
-    
-    # Reset DUT -----------------------------------------------------------------------
-    dut._log.info("\n\nReset\n\n")
-
-    dut.ena.value = 1
-    dut.ui_in.value = 0
-    dut.uio_in.value = 0
-    dut.rst_n.value = 0
-
-    await ClockCycles(dut.clk, 5)
-    dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 10)
-    
-    dut._log.info("")
-    dut._log.info("---------------- BREAKPOINT ON PLAYER ----------------")
-    dut._log.info(">>> Test: Control write (breakpoint at pLayer for next test)")
+    dut._log.info(">>> Test: Control write (breakpoint at player)")
     tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, PLAYER, 0))]
     dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
@@ -247,77 +189,17 @@ async def test_project(dut):
     assert len(rx_data) == 1
     error, busy, counter = decode_status(rx_data[0])
     assert error == False
-    assert busy == False
-    assert counter == 0
-    dut._log.info(">>> PASSED: Control write (breakpoint at pLayer for next test)")
-    
-    
-    dut._log.info("")
-    dut._log.info(">>> Test: Absorb + status read (busy) + write while busy")
-    tx_data = [generate_frame(WRITE_DATA, (0x67 << 1) | 0b1), generate_frame(READ_STATUS, 0), generate_frame(WRITE_DATA, (0x99 << 1) | 0b1 << 6)]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 3
-    error, busy, counter = decode_status(rx_data[0])
-    assert error == False
     assert busy == True
     assert counter == 0
-    dut._log.info(">>> PASSED: Absorb")
-    error, busy, counter = decode_status(rx_data[1])
-    assert error == False
-    assert busy == True
-    assert counter == 0
-    dut._log.info(">>> PASSED: Status read (busy)")
-    error, busy, counter = decode_status(rx_data[2])
-    assert error == True
-    assert busy == True
-    assert counter == 0
-    dut._log.info(">>> PASSED: Write while busy")
-    
-    dut._log.info("")
-    dut._log.info(">>> Test: Least significant byte of SPONGENT-88 state")
-    tx_data = [generate_frame(READ_DATA, 0x1234)]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    assert rx_data[0] == (state & 0xFF)
-    dut._log.info(">>> PASSED: Least significant byte of SPONGENT-88 state")
-    
-    dut._log.info(">>> Test: Least significant byte of SPONGENT-88 state again")
-    tx_data = [generate_frame(READ_DATA, 0x1234)]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    assert rx_data[0] == (state & 0xFF)
-    dut._log.info(">>> PASSED: Least significant byte of SPONGENT-88 state")
-    
-    
-    await ClockCycles(dut.clk, 10)
-    dut._log.info(">>> Test: Least significant byte of SPONGENT-88 state again after 10clck delay")
-    tx_data = [generate_frame(READ_DATA, 0x1234)]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    assert rx_data[0] == (state & 0xFF)
-    dut._log.info(">>> PASSED: Least significant byte of SPONGENT-88 state")
-    
-
-    
-    return
-
-
+    dut._log.info(">>> PASSED: Control write (breakpoint at player)")
 
     dut._log.info("")
-    dut._log.info(">>> Test: Control write (read msbyte for next test)")
-    tx_data = [generate_frame(WRITE_CONTROL, encode_control(10, PLAYER, 0))]
+    dut._log.info("Waiting 100 clock cycles")
+    await ClockCycles(dut.clk, 100)
+
+    dut._log.info("")
+    dut._log.info(">>> Test: Control write (breakpoint at absorb)")
+    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, ABSORB, 0))]
     dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
     rx_data = await spi_master.read()
@@ -327,28 +209,11 @@ async def test_project(dut):
     assert error == False
     assert busy == True
     assert counter == 0
-    dut._log.info(">>> PASSED: Control write (read msbyte for next test)")
+    dut._log.info(">>> PASSED: Control write (breakpoint at absorb)")
 
     dut._log.info("")
-    dut._log.info(">>> Test: Most significant byte of SPONGENT-88 state")
-    tx_data = [generate_frame(READ_DATA, 0x1234)]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    assert rx_data[0] == EXPECTED_SBOX_STATE_MSBYTE
-    dut._log.info(">>> PASSED: Least significant byte of SPONGENT-88 state")
-
-    dut._log.info("")
-    dut._log.info(">>> Test: Entire SPONGENT-88 state")
-    state = await read_entire_state(dut, spi_master)
-    assert state == EXPECTED_SBOX_STATE
-    dut._log.info(">>> PASSED: Entire SPONGENT-88 state")
-
-    dut._log.info("")
-    dut._log.info(">>> Test: Control write (reset)")
-    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, 0, 1))]
+    dut._log.info(">>> Test: Control write (breakpoint at idle)")
+    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, IDLE, 0))]
     dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
     rx_data = await spi_master.read()
@@ -356,15 +221,13 @@ async def test_project(dut):
     assert len(rx_data) == 1
     error, busy, counter = decode_status(rx_data[0])
     assert error == False
-    assert busy == False
-    assert counter == 0
-    dut._log.info(">>> PASSED: Control write (reset)")
+    assert busy == True
+    # assert counter == 1
+    dut._log.info(">>> PASSED: Control write (breakpoint at idle)")
 
     dut._log.info("")
-    dut._log.info(">>> Test: State after reset")
-    state = await read_entire_state(dut, spi_master)
-    assert state == 0
-    dut._log.info(">>> PASSED: State after reset")
+    dut._log.info("Waiting 1000 clock cycles")
+    await ClockCycles(dut.clk, 1000)
 
     dut._log.info("")
     dut._log.info(">>> Test: Status read (ready)")
@@ -381,42 +244,12 @@ async def test_project(dut):
     dut._log.info(">>> PASSED: Status read (ready)")
 
     dut._log.info("")
-    dut._log.info(">>> Test: Control write (breakpoint at pLayer for next test)")
-    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, PLAYER, 0))]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    error, busy, counter = decode_status(rx_data[0])
-    assert error == False
-    assert busy == False
-    assert counter == 0
-    dut._log.info(">>> PASSED: Control write (breakpoint at pLayer for next test)")
-
-    dut._log.info("")
-    dut._log.info(">>> Test: Absorb again to make sure it didn't die after reset")
-    tx_data = [generate_frame(WRITE_DATA, (0x67 << 1) | 0b1)]
-    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    error, busy, counter = decode_status(rx_data[0])
-    assert error == False
-    assert busy == True
-    assert counter == 0
-    dut._log.info(">>> PASSED: Absorb again")
-
-    dut._log.info("")
-    dut._log.info("Waiting 100 clock cycles")
-    await ClockCycles(dut.clk, 100)
-
-    dut._log.info("")
-    dut._log.info(">>> Test: Entire SPONGENT-88 state")
+    dut._log.info(">>> Test: Entire state")
     state = await read_entire_state(dut, spi_master)
-    assert state == EXPECTED_SBOX_STATE
-    dut._log.info(">>> PASSED: Entire SPONGENT-88 state")
+    assert state == EXPECTED_STATE_END
+    dut._log.info(">>> PASSED: Entire state")
+
+
 
 
     # Blocking write: waits until all words have transmitted

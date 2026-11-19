@@ -26,8 +26,10 @@ module spongent88_core (
 
 	integer sbox_nibble;
 	integer read_byte;
+	integer player_bit;
 
 	reg [2:0] fsm_state;
+	reg pause;
 
 	reg [1:0] command;
 	reg [7:0] control;
@@ -36,7 +38,6 @@ module spongent88_core (
 	reg [3:0] msg_counter;
 	reg [5:0] counter;
 	reg [4:0] sbox_counter;
-	reg player_pause; // Used during breakpoint to prevent continuous repositioning
 
 	reg [87:0] state;
 	reg [5:0] lfsr;
@@ -92,13 +93,13 @@ module spongent88_core (
 	always @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
 			fsm_state <= IDLE;
+			pause <= 1'b0;
 			command <= 2'b0;
 			control <= 8'b0;
 			miso <= 8'b0;
 			msg_counter <= 4'b0;
 			counter <= 6'b0;
 			sbox_counter <= 5'b0;
-			player_pause <= 0;
 			state <= 88'b0;
 			lfsr <= 6'b000101;
 		end else begin
@@ -156,22 +157,19 @@ module spongent88_core (
 				end
 			end else if (sck_fall) begin
 				// read in new bit
-				if (fsm_state != ABSORB) begin // Why not just put IDLE? Do we allow fsm transition during other states? 
-				// Ah I get it, because during the rest of the computation, the host may still want to inquire the system status, so as long as it's not
-				// absorbing or squeezing, 
-					if (msg_counter < 2) begin
-						command <= { command[0], rx }; // command[0] dictates read or write state. Who is writing to that?
-						// the if block triggers for the first two MSB of the message, but then the command always becomes write data, write control, and never read
-						// I'm assuming Ronson used command[0] for testing purposes
-					end else if (command == WRITE_CONTROL && msg_counter < 10) begin
-						control <= { control[6:0], rx };
-					end
+				if (msg_counter < 2) begin
+					command <= { command[0], rx }; // command[0] dictates read or write state. Who is writing to that?
+					// the if block triggers for the first two MSB of the message, but then the command always becomes write data, write control, and never read
+					// I'm assuming Ronson used command[0] for testing purposes
+				end else if (command == WRITE_CONTROL && msg_counter < 10) begin
+					control <= { control[6:0], rx };
 				end
 				msg_counter <= msg_counter + 1;
 			end
 
 			if (msg_counter == 0 && control_reset) begin
 				fsm_state <= IDLE;
+				pause <= 1'b0;
 				command <= 2'b0;
 				control <= 8'b0;
 				miso <= 8'b0;
@@ -185,73 +183,113 @@ module spongent88_core (
 					IDLE: begin
 					end
 					ABSORB: begin
-						if (counter < 8) begin
-							if (sck_fall) begin
-								state <= { state[87:8], state[7:0] ^ (rx << (7 - counter[2:0])) };
-								counter <= counter + 1;
+						if (pause) begin
+							if (msg_counter >= 10 && control_breakpoint != ABSORB) begin
+								pause <= 1'b0;
+								fsm_state <= LFSR;
 							end
 						end else begin
-							counter <= 6'b0;
-							lfsr <= 6'b000101;
-							if (control_breakpoint != ABSORB) begin
-								fsm_state <= LFSR;
+							if (counter < 8) begin
+								if (sck_fall) begin
+									state <= { state[87:8], state[7:0] ^ (rx << (7 - counter[2:0])) };
+									counter <= counter + 1;
+								end
+							end else begin
+								counter <= 6'b0;
+								lfsr <= 6'b000101;
+								if (control_breakpoint != ABSORB) begin
+									fsm_state <= LFSR;
+								end else begin
+									pause <= 1'b1;
+								end
 							end
 						end
 					end
 					LFSR: begin
-						state <= { state[87:82] ^ lfsr_reversed, state[81:6], state[5:0] ^ lfsr };
-						lfsr <= increment_lfsr(lfsr);
-						sbox_counter <= 0;
-						if (control_breakpoint != LFSR) begin
-							fsm_state <= SBOX;
+						if (pause) begin
+							if (msg_counter >= 10 && control_breakpoint != LFSR) begin
+								pause <= 1'b0;
+								fsm_state <= SBOX;
+							end
+						end else begin
+							state <= { state[87:82] ^ lfsr_reversed, state[81:6], state[5:0] ^ lfsr };
+							lfsr <= increment_lfsr(lfsr);
+							sbox_counter <= 0;
+							if (control_breakpoint != LFSR) begin
+								fsm_state <= SBOX;
+							end else begin
+								pause <= 1'b1;
+							end
 						end
 					end
 					SBOX: begin
-						if (sbox_counter < 22) begin
-							sbox_nibble = sbox_counter * 4;
-							state[sbox_nibble +: 4] <= sbox(state[sbox_nibble +: 4]);
-							if (sbox_counter == 21) begin
-								if (control_breakpoint != SBOX) begin
-									fsm_state <= PLAYER;
-									sbox_counter <= 0;
-								end else begin
-									sbox_counter <= sbox_counter + 1; // You need this line to stop sbox from continuously running
-								end
-							end else begin
-								sbox_counter <= sbox_counter + 1;
+						if (pause) begin
+							if (msg_counter >= 10 && control_breakpoint != SBOX) begin
+								pause <= 1'b0;
+								fsm_state <= PLAYER;
 							end
 						end else begin
-							if (control_breakpoint != SBOX) begin
-								fsm_state <= PLAYER;
-								sbox_counter <= 0;
+							if (sbox_counter < 22) begin
+								sbox_nibble = sbox_counter * 4;
+								state[sbox_nibble +: 4] <= sbox(state[sbox_nibble +: 4]);
+								if (sbox_counter == 21) begin
+									sbox_counter <= 0;
+									if (control_breakpoint != SBOX) begin
+										fsm_state <= PLAYER;
+									end else begin
+										pause <= 1'b1;
+									end
+								end else begin
+									sbox_counter <= sbox_counter + 1;
+								end
 							end
-								// Do nothing
 						end
 					end
+					// Ronson: the breakpoint and counter
+					// might be a bit sketch here. Robin,
+					// please take a look if you can
 					PLAYER: begin
-						if (!player_pause) begin
-							reg[6:0] j;
-							for (j = 0; j < 87; j = j + 1) begin
-								state[P(j)] <= state[j];
+						if (pause) begin
+							if (msg_counter >= 10 && control_breakpoint != PLAYER) begin
+								pause <= 1'b0;
+								if (counter < 44) begin
+									counter <= counter + 1; // Reuse counter to perform 45 rounds
+									fsm_state <= LFSR;
+								end else begin
+									counter <= 0;
+									fsm_state <= IDLE;
+								end
+							end
+						end else begin
+							for (player_bit = 0; player_bit < 87; player_bit = player_bit + 1) begin
+								state[P(player_bit)] <= state[player_bit];
 							end
 							// Why does this work?
 							// Verilog recognizes that this can be done in parallel using combinational all in the same clock
 
-						end 
-						if (control_breakpoint != PLAYER) begin
-							player_pause <= 0;
+							// this means that 44
+							// rounds were
+							// completed before
+							// the one that just
+							// got done. if
+							// counter == 44, this
+							// was the last round
 							if (counter < 44) begin
-								fsm_state <= LFSR;
-								counter <= counter + 1; // Reuse counter to perform 45 rounds
+								if (control_breakpoint != PLAYER) begin
+									counter <= counter + 1; // Reuse counter to perform 45 rounds
+									fsm_state <= LFSR;
+								end else begin
+									pause <= 1'b1;
+								end
 							end else begin
-								fsm_state <= IDLE;
-								counter <= 0;
+								if (control_breakpoint != PLAYER) begin
+									counter <= 0;
+									fsm_state <= IDLE;
+								end else begin
+									pause <= 1'b1;
+								end
 							end
-						end else begin
-							player_pause <= 1;
-							// Do nothing until breakpoint is released
 						end
-						
 					end
 					default: begin
 						fsm_state <= IDLE;
