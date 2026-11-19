@@ -46,6 +46,7 @@ module spongent88_core (
 	wire[3:0] control_read_byte = { control[7:4] };
 	wire[2:0] control_breakpoint = { control[3:1] };
 	wire control_reset = { control[0] };
+	wire busy = { fsm_state != IDLE };
 
 	function [5:0] increment_lfsr;
 		input [5:0] lfsr;
@@ -115,13 +116,13 @@ module spongent88_core (
 								// no error
 								miso[7] <= 1'b0;
 								// busy
-								miso[6] <= 1'b1;
+								miso[6] <= busy;
 								miso[5:0] <= counter;
 							end else begin
 								// error
 								miso[7] <= 1'b1;
 								// busy
-								miso[6] <= 1'b1;
+								miso[6] <= busy;
 								miso[5:0] <= counter;
 							end
 						end
@@ -139,14 +140,22 @@ module spongent88_core (
 							// progress. for now,
 							// it's like this for
 							// testing.
-							read_byte = ((control_read_byte < 11) ? control_read_byte : 0) * 8;
-							miso <= state[read_byte +: 8];
+							if (fsm_state == control_breakpoint) begin
+								read_byte = ((control_read_byte < 11) ? control_read_byte : 0) * 8;
+								miso <= state[read_byte +: 8];
+								if (control_breakpoint == IDLE && control_read_byte == 0) begin
+									counter <= 6'b0;
+									lfsr <= 6'b000101;
+									fsm_state <= LFSR;
+								end
+							end else begin
+								miso <= 8'b0;
+							end
 						end
 						// read status
 						READ_STATUS: begin
 							miso[7] <= 0; // no error for now?
-							// busy if not idle
-							miso[6] <= fsm_state != IDLE;
+							miso[6] <= busy;
 							miso[5:0] <= counter;
 						end
 						default: begin

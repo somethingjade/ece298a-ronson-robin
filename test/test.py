@@ -31,8 +31,11 @@ def generate_frame(command, data):
 async def read_entire_state(dut, spi_master):
     state = 0
     tx_data = []
-    for i in range(11):
-        tx_data.append(generate_frame(WRITE_CONTROL, encode_control(i, 0, 0)))
+    # we can read an invalid byte (11) to read the least significant byte without starting another permutation
+    tx_data.append(generate_frame(WRITE_CONTROL, encode_control(11, 0, 0)))
+    tx_data.append(generate_frame(READ_DATA, 0))
+    for i in range(10):
+        tx_data.append(generate_frame(WRITE_CONTROL, encode_control(i + 1, 0, 0)))
         tx_data.append(generate_frame(READ_DATA, 0))
     dut._log.info(f"TX: {' '.join(f'{num:04x}' for num in tx_data)}")
     await spi_master.write(tx_data)
@@ -44,6 +47,64 @@ async def read_entire_state(dut, spi_master):
         assert error == False
         state |= (rx_data[2*i + 1] << (8 * i))
     return state
+
+async def write_data(spi_master, data):
+    tx_data = [generate_frame(WRITE_DATA, data & 0xFF)]
+    # dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    # dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    return decode_status(rx_data[0])
+
+async def write_control(spi_master, read_byte, pause_at, reset):
+    tx_data = [generate_frame(WRITE_CONTROL, encode_control(read_byte, pause_at, reset))]
+    # dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    # dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    return decode_status(rx_data[0])
+
+async def read_data(spi_master):
+    tx_data = [generate_frame(READ_DATA, 0)]
+    # dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    # dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    return rx_data[0]
+
+async def read_status(spi_master):
+    tx_data = [generate_frame(READ_STATUS, 0)]
+    # dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    # dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    return decode_status(rx_data[0])
+
+async def wait_for_ready(spi_master):
+    error, busy, _ = await read_status(spi_master)
+    while busy and not error:
+        error, busy, _ = await read_status(spi_master)
+    return not error
+
+async def hash(spi_master, msg, num_bytes):
+    ret = 0
+    msg = (msg << 8) | 0x80 # padding
+    for i in reversed(range(num_bytes + 1)):
+        byte = (msg >> (i*8)) & 0xFF
+        await wait_for_ready(spi_master)
+        await write_data(spi_master, byte)
+    for _ in range(0, 11):
+        await wait_for_ready(spi_master)
+        ret <<= 8
+        ret |= await read_data(spi_master)
+    await wait_for_ready(spi_master)
+    return ret
+
+
         
 
 @cocotb.test()
@@ -87,6 +148,9 @@ async def test_project(dut):
     EXPECTED_STATE = 0x8eeeeeeeeeeeeeeeeeee98 # from existing implementation
     EXPECTED_STATE_END = 0xe95aa77a862489d1e04491 # from existing implementation
 
+    TEST_VECTOR = 0x53706F6E6765202B2050726573656E74203D2053706F6E67656E74
+    EXPECTED_HASH = 0x69971BF96DEF95BFC46822
+
     dut._log.info("")
     dut._log.info(">>> Test: Status read (ready)")
     tx_data = [generate_frame(READ_STATUS, 0x6767)]
@@ -125,7 +189,7 @@ async def test_project(dut):
     assert len(rx_data) == 3
     error, busy, counter = decode_status(rx_data[0])
     assert error == False
-    assert busy == True
+    assert busy == False
     assert counter == 0
     dut._log.info(">>> PASSED: Absorb")
     error, busy, counter = decode_status(rx_data[1])
@@ -226,8 +290,8 @@ async def test_project(dut):
     dut._log.info(">>> PASSED: Control write (breakpoint at idle)")
 
     dut._log.info("")
-    dut._log.info("Waiting 1000 clock cycles")
-    await ClockCycles(dut.clk, 1000)
+    dut._log.info("Waiting for ready")
+    await wait_for_ready(spi_master)
 
     dut._log.info("")
     dut._log.info(">>> Test: Status read (ready)")
@@ -249,6 +313,26 @@ async def test_project(dut):
     assert state == EXPECTED_STATE_END
     dut._log.info(">>> PASSED: Entire state")
 
+    dut._log.info("")
+    dut._log.info(">>> Test: Control write (reset)")
+    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, IDLE, 1))]
+    dut._log.info(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    await spi_master.write(tx_data)
+    rx_data = await spi_master.read()
+    dut._log.info(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    assert len(rx_data) == 1
+    error, busy, counter = decode_status(rx_data[0])
+    assert error == False
+    assert busy == False
+    assert counter == 0
+    dut._log.info(">>> PASSED: Control write (reset)")
+    
+
+    dut._log.info("")
+    dut._log.info(">>> Test: hash test vector")
+    hash_result = await hash(spi_master, TEST_VECTOR, int(216/8))
+    assert hash_result == EXPECTED_HASH
+    dut._log.info(">>> PASSED: hash test vector")
 
 
 
