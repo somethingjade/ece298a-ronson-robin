@@ -5,7 +5,7 @@ from cocotb.triggers import ClockCycles
 from cocotbext.spi import SpiBus, SpiConfig, SpiMaster
 import SPONGENT
 import logging
-
+import random
 
 IDLE = 0b000;
 ABSORB = 0b001;
@@ -61,60 +61,60 @@ async def read_entire_state(dut, spi_master):
         state |= (rx_data[2*i + 1] << (8 * i))
     return state
 
-async def write_data(spi_master, data):
+async def write_data(dut, spi_master, data):
     tx_data = [generate_frame(WRITE_DATA, data & 0xFF)]
-    # dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
     rx_data = await spi_master.read()
-    # dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
     assert len(rx_data) == 1
     return decode_status(rx_data[0])
 
-async def write_control(spi_master, read_byte, pause_at, reset):
+async def write_control(dut, spi_master, read_byte, pause_at, reset):
     tx_data = [generate_frame(WRITE_CONTROL, encode_control(read_byte, pause_at, reset))]
-    # dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
     rx_data = await spi_master.read()
-    # dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
     assert len(rx_data) == 1
     return decode_status(rx_data[0])
 
-async def read_data(spi_master):
+async def read_data(dut, spi_master) -> int:
     tx_data = [generate_frame(READ_DATA, 0)]
-    # dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
     rx_data = await spi_master.read()
-    # dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
     assert len(rx_data) == 1
     return rx_data[0]
 
-async def read_status(spi_master):
+async def read_status(dut, spi_master):
     tx_data = [generate_frame(READ_STATUS, 0)]
-    # dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
+    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
     rx_data = await spi_master.read()
-    # dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
+    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
     assert len(rx_data) == 1
     return decode_status(rx_data[0])
 
-async def wait_for_ready(spi_master):
-    error, busy, _ = await read_status(spi_master)
+async def wait_for_ready(dut, spi_master):
+    error, busy, _ = await read_status(dut, spi_master)
     while busy and not error:
-        error, busy, _ = await read_status(spi_master)
+        error, busy, _ = await read_status(dut, spi_master)
     return not error
 
-async def hash(spi_master, msg, num_bytes):
+async def hash(dut, spi_master, msg, num_bytes):
     ret = 0
     msg = (msg << 8) | 0x80 # padding
     for i in reversed(range(num_bytes + 1)):
         byte = (msg >> (i*8)) & 0xFF
-        await wait_for_ready(spi_master)
-        await write_data(spi_master, byte)
+        await wait_for_ready(dut, spi_master)
+        await write_data(dut, spi_master, byte)
     for _ in range(0, 11):
-        await wait_for_ready(spi_master)
+        await wait_for_ready(dut, spi_master)
         ret <<= 8
-        ret |= await read_data(spi_master)
-    await wait_for_ready(spi_master)
+        ret |= await read_data(dut, spi_master)
+    await wait_for_ready(dut, spi_master)
     return ret
 
 def load_expected_values(dut, message_block):  
@@ -224,13 +224,7 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: Status read (ready)")
-    tx_data = [generate_frame(READ_STATUS, 0x6767)]
-    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    error, busy, counter = decode_status(rx_data[0])
+    error, busy, counter = await read_status(dut, spi_master)
     assert error == False
     assert busy == False
     assert counter == 0
@@ -238,13 +232,7 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: Control write (breakpoint at absorb)")
-    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, ABSORB, 0))]
-    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    error, busy, counter = decode_status(rx_data[0])
+    error, busy, counter = await write_control(dut, spi_master, 0, ABSORB, 0)
     assert error == False
     assert busy == False
     assert counter == 0
@@ -252,23 +240,17 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: Absorb + status read (busy) + write while busy")
-    tx_data = [generate_frame(WRITE_DATA, (0x67 << 1) | 0b1), generate_frame(READ_STATUS, 0), generate_frame(WRITE_DATA, (0x99 << 1) | 0b1 << 6)]
-    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 3
-    error, busy, counter = decode_status(rx_data[0])
+    error, busy, counter = await write_data(dut, spi_master, (0x67 << 1) | 0b1)
     assert error == False
     assert busy == False
     assert counter == 0
     dut._log.info(">>> PASSED: Absorb")
-    error, busy, counter = decode_status(rx_data[1])
+    error, busy, counter = await read_status(dut, spi_master)
     assert error == False
     assert busy == True
     assert counter == 0
     dut._log.info(">>> PASSED: Status read (busy)")
-    error, busy, counter = decode_status(rx_data[2])
+    error, busy, counter = await write_data(dut, spi_master, (0x99 << 1) | 0b1 << 6)
     assert error == True
     assert busy == True
     assert counter == 0
@@ -280,13 +262,7 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: Control write (breakpoint at lfsr)")
-    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, LFSR, 0))]
-    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    error, busy, counter = decode_status(rx_data[0])
+    error, busy, counter = await write_control(dut, spi_master, 0, LFSR, 0)
     assert error == False
     assert busy == True
     assert counter == 0
@@ -298,13 +274,7 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: Control write (breakpoint at sbox)")
-    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, SBOX, 0))]
-    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    error, busy, counter = decode_status(rx_data[0])
+    error, busy, counter = await write_control(dut, spi_master, 0, SBOX, 0)
     assert error == False
     assert busy == True
     assert counter == 0
@@ -316,13 +286,7 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: Control write (breakpoint at player)")
-    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, PLAYER, 0))]
-    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    error, busy, counter = decode_status(rx_data[0])
+    error, busy, counter = await write_control(dut, spi_master, 0, PLAYER, 0)
     assert error == False
     assert busy == True
     assert counter == 0
@@ -334,13 +298,7 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: Control write (breakpoint at absorb)")
-    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, ABSORB, 0))]
-    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    error, busy, counter = decode_status(rx_data[0])
+    error, busy, counter = await write_control(dut, spi_master, 0, ABSORB, 0)
     assert error == False
     assert busy == True
     assert counter == 0
@@ -348,13 +306,7 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: Control write (breakpoint at idle)")
-    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, IDLE, 0))]
-    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    error, busy, counter = decode_status(rx_data[0])
+    error, busy, counter = await write_control(dut, spi_master, 0, IDLE, 0)
     assert error == False
     assert busy == True
     # assert counter == 1
@@ -362,17 +314,11 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info("Waiting for ready")
-    await wait_for_ready(spi_master)
+    await wait_for_ready(dut, spi_master)
 
     dut._log.info("")
     dut._log.info(">>> Test: Status read (ready)")
-    tx_data = [generate_frame(READ_STATUS, 0x6767)]
-    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    error, busy, counter = decode_status(rx_data[0])
+    error, busy, counter = await read_status(dut, spi_master)
     assert error == False
     assert busy == False
     assert counter == 0
@@ -386,13 +332,7 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: Control write (reset)")
-    tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, IDLE, 1))]
-    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    await spi_master.write(tx_data)
-    rx_data = await spi_master.read()
-    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    assert len(rx_data) == 1
-    error, busy, counter = decode_status(rx_data[0])
+    error, busy, counter = await write_control(dut, spi_master, 0, IDLE, 1)
     assert error == False
     assert busy == False
     assert counter == 0
@@ -401,62 +341,18 @@ async def test_project(dut):
 
     dut._log.info("")
     dut._log.info(">>> Test: hash test vector")
-    hash_result = await hash(spi_master, TEST_VECTOR, int(216/8))
+    hash_result = await hash(dut, spi_master, TEST_VECTOR, int(216/8))
     assert hash_result == EXPECTED_HASH
     dut._log.info(">>> PASSED: hash test vector")
 
-
-
-    # Blocking write: waits until all words have transmitted
-
-    # Retrieve received words
-
-    # # Second transaction after CS_N has been idle
-    # await ClockCycles(dut.clk, 5)
-    #
-    # tx_data = [(0x03A3) << 6]
-    # dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    # await spi_master.write(tx_data)
-    # rx_data = await spi_master.read()
-    #
-    # dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    #
-    # assert len(rx_data) == 1
-    # assert isinstance(rx_data, list)
-    # assert rx_data[0] == ((tx_data[0] & 0x3FFF) >> 6)
-    
-    # # First transaction
-    # tx_data = [0x0000, 0x4000, 0x8000, 0xC6B0]
-    #
-    # dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    #
-    # # Blocking write: waits until all words have transmitted
-    # await spi_master.write(tx_data)
-    #
-    # # Retrieve received words
-    # rx_data = await spi_master.read()
-    #
-    # dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    #
-    # assert len(rx_data) == 4
-    # assert rx_data[0] == 0x0000
-    # assert rx_data[1] == 0x0000
-    # assert rx_data[2] == 0x00FF
-    # assert rx_data[3] == ((tx_data[3] & 0x3FFF) >> 6)
-    #
-    # # Second transaction after CS_N has been idle
-    # await ClockCycles(dut.clk, 5)
-    #
-    # tx_data = [(0x03A3) << 6]
-    # dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-    # await spi_master.write(tx_data)
-    # rx_data = await spi_master.read()
-    #
-    # dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-    #
-    # assert len(rx_data) == 1
-    # assert isinstance(rx_data, list)
-    # assert rx_data[0] == ((tx_data[0] & 0x3FFF) >> 6)
+    # DO NOT REMOVE THIS COMMENT
+    # TODO: One of the test cases for testing spi should be mass write
+    # right now, we use the helper function write_control and write_data, but they only perform
+    # one byte write at a time, instead of writing all bytes in a single transaction
+    # i.e. tx_data = [0x00, 0x01, 0x02, 0x03, ..., n_th byte]
+    # read back n+1 bytes in a single transaction
+    # This is important because the behavior of the cs_n signal may or may not be different on 
+    # actual HW vs the simulation
     
     await ClockCycles(dut.clk, 20)
     dut._log.info("---------------- CHECKING WITH PYTHON IMPLEMENTATION ----------------")    
@@ -466,7 +362,7 @@ async def test_project(dut):
     
     
     # the function is defined here because it is not a helper function, and rather part of the test plan itself
-    async def component_tests(dut, spi_master: SpiBus, component_states: list[int], reset_per_component: bool, permutation: bool):
+    async def component_tests(dut, spi_master: SpiBus, message_block: int, component_states: list[int], reset_per_component: bool, permutation: bool):
         """
         A function that tests the system's breakpoint capabilities for the main internal spongent components: absorb, lfsr, sbox, player.
         In a single round, all 4 fsm_states will be paused at, read from, and compared to the expected values given from the Spongent implementation
@@ -474,13 +370,14 @@ async def test_project(dut):
         Args:
             dut: 
             spi_master: the SpiBus being used for this dut
+            message_block: an 8-bit message, with or without padding doesn't matter
             component_states: a list[int] of size 4 containing the the entire 88-bits of each fsm_state: absorb, lfsr, sbox, player
             reset_per_component: set to True if you want to reset the device for each possible breakpoint that can be tested. 
-                For example, the device will be reset when the breakpoint is set to lfsr, and when the breakpoint changes to sbox, the device 
-                will be reset again. Naturally, this requires us to re-absorb the message before we reach the sbox state. Setting this parameter
-                to True will only allow 1 round to run out of the 45 rounds per permutation.
+                            For example, the device will be reset when the breakpoint is set to lfsr, and when the breakpoint changes to sbox, the device 
+                            will be reset again. Naturally, this requires us to re-absorb the message before we reach the sbox state. Setting this parameter
+                            to True will only allow 1 round to run out of the 45 rounds per permutation.
             permutation: set this to True if you want all 45 rounds in the permutation to run. This means that for a single 8-bit data absorbed, 
-                45 rounds of lfsr->sbox->player will be performed. This is tested and implemented using the existing python implementation. 
+                        45 rounds of lfsr->sbox->player will be performed. This is tested and implemented using the existing python implementation. 
         Returns:
             A tuple of 3, (error, busy, counter)
         """
@@ -493,9 +390,7 @@ async def test_project(dut):
         await ClockCycles(dut.clk, 5)
         dut.rst_n.value = 1
         await ClockCycles(dut.clk, 10)
-        
-        dut._log.info(f"---------------- SET BREAKPOINTS AND RESET {('AT EVERY BREAKPOINT') if reset_per_component else ('PER ROUND')} ----------------")
-        
+                
         # When performing 45 rounds, we do not want to reset at each breakpoint
         reset_per_component = False if permutation else reset_per_component
         first_time_absorbing = True
@@ -523,13 +418,7 @@ async def test_project(dut):
                 # First step, set the break point at the correct location
                 dut._log.info(f"\n----- SET BREAKPOINT AT {FSM_STATES_NAMES[i+1]} -----")
                 dut._log.info(">>> Test: Control write")
-                tx_data = [generate_frame(WRITE_CONTROL, encode_control(0, FSM_STATES[i+1], 0))]
-                dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-                await spi_master.write(tx_data)
-                rx_data = await spi_master.read()
-                dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-                assert len(rx_data) == 1
-                error, busy, counter = decode_status(rx_data[0])
+                error, busy, counter = await write_control(dut, spi_master, 0, FSM_STATES[i+1], 0)
                 assert error == False
                 assert busy == False if reset_per_component else True
                 if (cnt == 0):
@@ -546,33 +435,23 @@ async def test_project(dut):
                 # Second step, absorb a byte of data into the state registers once. Only permit re-absorbing at each breakpoint if you reset everything
                 if (reset_per_component or first_time_absorbing): 
                     dut._log.info(f"\n>>> Test: Absorb + status read (busy)")
-                    tx_data = [generate_frame(WRITE_DATA, (0x67 << 1) | 0b1), generate_frame(READ_STATUS, 0)]
-                    dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-                    await spi_master.write(tx_data)
-                    rx_data = await spi_master.read()
-                    dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-                    assert len(rx_data) == 2
-                    error, busy, counter = decode_status(rx_data[0])
+                    error, busy, counter = await write_data(dut, spi_master, message_block)
                     assert error == False
                     assert busy == False
                     assert counter == cnt
                     dut._log.info(">>> PASSED: Absorb")
-                    error, busy, counter = decode_status(rx_data[1])
+                    error, busy, counter = await read_status(dut, spi_master)
                     assert error == False
                     assert busy == True
                     assert counter == cnt
                     dut._log.info(">>> PASSED: Status read (busy)")
                     first_time_absorbing = False
+                    
+
                 
                 # Third step, try writing while the system is busy
                 dut._log.info(f"\n>>> Test: Write while busy at {FSM_STATES_NAMES[i+1]}")
-                tx_data = [generate_frame(WRITE_DATA, (0x99 << 1) | 0b1 << 6)]
-                dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-                await spi_master.write(tx_data)
-                rx_data = await spi_master.read()
-                dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-                assert len(rx_data) == 1
-                error, busy, counter = decode_status(rx_data[0])
+                error, busy, counter = await write_data(dut, spi_master, (0x99 << 1) | (1 << 6))
                 assert error == True
                 assert busy == True
                 assert counter == cnt
@@ -580,25 +459,15 @@ async def test_project(dut):
                 
                 # Fourth step, read the LSByte from the state registers for this specific breakpoint (fsm_state)
                 dut._log.info(f"\n>>> Test: Least significant byte of SPONGENT-88 state at {FSM_STATES_NAMES[i+1]}")
-                tx_data = [generate_frame(READ_DATA, 0x1234)]
-                dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-                await spi_master.write(tx_data)
-                rx_data = await spi_master.read()
-                dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-                assert len(rx_data) == 1
-                assert rx_data[0] == (component_states[i] & 0xFF)
+                rx_data = await read_data(dut, spi_master)
+                assert rx_data == (component_states[i] & 0xFF)
                 dut._log.info(f">>> PASSED: Least significant byte of SPONGENT-88 state at {FSM_STATES_NAMES[i+1]}")
                 
                 # Fifth step, read the LSByte from the state registers AGAIN to ensure state is not changing without any mosi input
                 await ClockCycles(dut.clk, 10)
                 dut._log.info(f"\n>>> Test: LSByte again after 10clck delay at {FSM_STATES_NAMES[i+1]}")
-                tx_data = [generate_frame(READ_DATA, 0x1234)]
-                dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
-                await spi_master.write(tx_data)
-                rx_data = await spi_master.read()
-                dut._log.debug(f"RX: {' '.join(f'{num:016b}' for num in rx_data)}")
-                assert len(rx_data) == 1
-                assert rx_data[0] == (component_states[i] & 0xFF)
+                rx_data = await read_data(dut, spi_master)
+                assert rx_data == (component_states[i] & 0xFF)
                 dut._log.info(f">>> PASSED: Least significant byte of SPONGENT-88 state at {FSM_STATES_NAMES[i+1]}")
                 await ClockCycles(dut.clk, 10)
                     
@@ -608,11 +477,17 @@ async def test_project(dut):
                 component_states = apply_next_round(spongent, component_states)
                 dut._log.debug(f"After: {component_states}")
                     
-            
-    await component_tests(dut, spi_master, component_states, reset_per_component=True, permutation=False)
-    await component_tests(dut, spi_master, component_states, reset_per_component=False, permutation=False)
-    await component_tests(dut, spi_master, component_states, reset_per_component=False, permutation=True)
+    dut._log.info(f"\n---------------- RESET AT EACH BREAKPOINT, 1 ROUND ----------------")        
+    await component_tests(dut, spi_master, (0x67 << 1) | 0b1, component_states, reset_per_component=True, permutation=False)
+    dut._log.info(f"\n---------------- RESET ONCE, TRAVERSE EACH BREAKPOINT, 1 ROUND ----------------") 
+    await component_tests(dut, spi_master, (0x67 << 1) | 0b1, component_states, reset_per_component=False, permutation=False)
+    dut._log.info(f"\n---------------- PERMUTATION: 45 ROUNDS WITH BREAKPOINTS WITH PRE-SET INPUT ----------------") 
+    await component_tests(dut, spi_master, (0x67 << 1) | 0b1, component_states, reset_per_component=False, permutation=True)
     
     # Try the full permutation with a randomly generated byte
-    # component_states, spongent = load_expected_values(dut, message_block=(0x67 << 1) | 0b1)
+    dut._log.info(f"\n---------------- PERMUTATION: BREAKPOINTS WITH RANDOM INPUT BYTE ----------------") 
+    custom_random_byte = random.randint(0, 255)
+    component_states, spongent = load_expected_values(dut, message_block=custom_random_byte)
+    await component_tests(dut, spi_master, custom_random_byte, component_states, reset_per_component=False, permutation=True)
+    
 
