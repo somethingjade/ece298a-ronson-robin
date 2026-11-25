@@ -177,6 +177,7 @@ module spongent88_core (
 			end
 
 			if (msg_counter == 0 && control_reset) begin
+				// Note that the breakpoint is not reset through a soft reset
 				fsm_state <= IDLE;
 				pause <= 1'b0;
 				command <= 2'b0;

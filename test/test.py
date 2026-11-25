@@ -6,6 +6,7 @@ from cocotbext.spi import SpiBus, SpiConfig, SpiMaster
 import SPONGENT
 import logging
 import random
+import time
 
 IDLE = 0b000;
 ABSORB = 0b001;
@@ -21,21 +22,52 @@ READ_STATUS = 0b11;
 FSM_STATES = [IDLE, ABSORB, LFSR, SBOX, PLAYER]
 FSM_STATES_NAMES = ["IDLE", "ABSORB", "LFSR", "SBOX", "PLAYER"]
 
-def decode_status(byte):
+def decode_status(byte: int):
     """
-    Extracts the error, busy, and counter information from a value read in from SPI
+    Extracts the error, busy, and counter information from a the status (8 bits or more) read in from SPI. 
+    Usually used after a write command, or a read status command. Don't use this on a read data cmd, as
+    data in that scenario is interpretted differently. 
+    
+    **Note**: Both status and data read from the device is generally 8 bits, but it can be interpretted 
+    as 10 bits since the device has a feature (though not necessarily implemented) to include and report 
+    what we consider *unexpected* errors in bits 9 and 10 (counting from first bit as bit 1). These errors
+    occur (if implemented) when the system enters a *bad* but *possible* extraneous state, and are not related to
+    host-device handshaking caught during normal operations. This feature can be *safely* ignored (probably...)
+    
+    Examples of unexpected errors (that are may or may not be implemented):
+    - cs_n is high but spi_clock is still alive
+    - internal counter becomes > 45 
+    - sck_rise and sck_fall somehow manage to both exist at the same time
+    - etc
+    
     Args:
-        byte: Value to be interpreted
+        byte (int): Value to be interpreted (expected to be 16 bits)
+        
     Returns:
-        A tuple of 3, (error, busy, counter)
+        A tuple of 5, (spi_err, spongent_err, error, busy, counter), where spi_err and spongent_err can be ignored
     """
-    byte = byte & 0xFF
+    
+    assert len(bin(byte)) <= 16, "The value being interpretted is not 2 bytes?"
+    byte = byte & 0x3FF
+    
+    spi_err = (byte & (1 << 9)) != 0
+    spongent_err = (byte & (1 << 8)) != 0
     error = (byte & (1 << 7)) != 0
     busy = (byte & (1 << 6)) != 0
     counter = byte & 0x3F
-    return error, busy, counter
+    return spi_err, spongent_err, error, busy, counter
 
-def encode_control(read_byte, pause_at, reset):
+def encode_control(read_byte: int, pause_at: int, reset: int):
+    """Encode
+
+    Args:
+        read_byte (int): _description_
+        pause_at (int): _description_
+        reset (int): _description_
+
+    Returns:
+        _type_: _description_
+    """
     return ((read_byte & 0xF) << 4) | ((pause_at & 0b111) << 1) | (reset & 0b1)
 
 def generate_frame(command, data):
@@ -56,7 +88,7 @@ async def read_entire_state(dut, spi_master):
     dut._log.debug(f"RX: {' '.join(f'{num:02x}' for num in rx_data)}")
     assert len(rx_data) == 22
     for i in range(11):
-        error, _busy, _counter = decode_status(rx_data[2*i])
+        _, _, error, _busy, _counter = decode_status(rx_data[2*i])
         assert error == False
         state |= (rx_data[2*i + 1] << (8 * i))
     return state
@@ -97,15 +129,44 @@ async def read_status(dut, spi_master):
     assert len(rx_data) == 1
     return decode_status(rx_data[0])
 
-async def wait_for_ready(dut, spi_master):
-    error, busy, _ = await read_status(dut, spi_master)
+async def wait_for_ready(dut: any, spi_master: SpiBus):
+    """Continuously read the status of the device until it is no longer busy, and an error has not occured.
+    Busy represents any time the device is in a permutation, i.e. absorb, lfsr, sbox, player. Error
+    represents if the host tried to write data to the device while it was performing a permutaiton. This
+    error is considered an *expected* error.
+
+    Args:
+        dut (Any): 
+        spi_master (SpiBus): 
+
+    Returns:
+        (bool): Whether an *expected* error was detected while waiting for the status 
+    """
+    _, _, error, busy, _ = await read_status(dut, spi_master)
     while busy and not error:
-        error, busy, _ = await read_status(dut, spi_master)
+        _, _, error, busy, _ = await read_status(dut, spi_master)
     return not error
 
-async def hash(dut, spi_master, msg, num_bytes):
+async def hash(dut: any, spi_master: SpiBus, msg: int, num_bytes: int):
+    """Performs a full hash operation. Note the following expected behavior:
+    1 Absorption per hash, 1 grouping of (LFSR >> sBox >> pLayer) per round,
+    45 rounds per permutaiton, 1 permutation per byte of message (including padding),
+    1 permutation per 8/88 bits read back from state registers
+
+    Args:
+        dut (any): 
+        spi_master (SpiBus): The SpiBus containing the 4 signals required for transactions
+        msg (int): a byte-aligned value of otherwise arbitrary length that the user plans to get hashed.
+            Byte alignment is requied due to the limitations of our spongent implementation.
+            e.g. actual message: 0110 --> byte-aligned: 00000110
+            Pre-processing such as bit shifting, masking control bits, write/read operatoins, are performed internally.
+        num_bytes (int): How many bytes the message is
+
+    Returns:
+        (int): The final hash output. This is always going to be at most 88 bits.
+    """
     ret = 0
-    msg = (msg << 8) | 0x80 # padding
+    msg = (msg << 8) | 0x80 # padding performed on the basis that everything is byte aligned
     for i in reversed(range(num_bytes + 1)):
         byte = (msg >> (i*8)) & 0xFF
         await wait_for_ready(dut, spi_master)
@@ -184,7 +245,7 @@ async def test_project(dut):
 
     # Start system clock
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
-    dut._log.setLevel(logging.INFO)
+    dut._log.setLevel(logging.DEBUG)
 
     # Reset DUT
     dut._log.info("Reset")
@@ -202,7 +263,7 @@ async def test_project(dut):
 
     spi_config = SpiConfig(
         sclk_freq=10000000,
-        word_width=16,
+        word_width=16, # Must be 16 per our implementation limitations
         cpol=False,
         cpha=True,
         msb_first=True,
@@ -222,128 +283,141 @@ async def test_project(dut):
     TEST_VECTOR = 0x53706F6E6765202B2050726573656E74203D2053706F6E67656E74
     EXPECTED_HASH = 0x69971BF96DEF95BFC46822
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Status read (ready)")
-    error, busy, counter = await read_status(dut, spi_master)
+
+
+    # ========================================= BASIC TESTS =========================================
+    dut._log.info("\n>>> Test: Status read (ready)")
+    spi_err, spongent_err, error, busy, counter = await read_status(dut, spi_master)
+    assert spi_err == False
+    assert spongent_err == False
+    assert spi_err == False
+    assert spongent_err == False
     assert error == False
     assert busy == False
     assert counter == 0
     dut._log.info(">>> PASSED: Status read (ready)")
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Control write (breakpoint at absorb)")
-    error, busy, counter = await write_control(dut, spi_master, 0, ABSORB, 0)
+    dut._log.info("\n>>> Test: Control write (breakpoint at absorb)")
+    spi_err, spongent_err, error, busy, counter = await write_control(dut, spi_master, 0, ABSORB, 0)
+    assert spi_err == False
+    assert spongent_err == False
     assert error == False
     assert busy == False
     assert counter == 0
     dut._log.info(">>> PASSED: Control write (breakpoint at absorb)")
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Absorb + status read (busy) + write while busy")
-    error, busy, counter = await write_data(dut, spi_master, (0x67 << 1) | 0b1)
+    dut._log.info("\n>>> Test: Absorb + status read (busy) + write while busy")
+    spi_err, spongent_err, error, busy, counter = await write_data(dut, spi_master, (0x67 << 1) | 0b1)
+    assert spi_err == False
+    assert spongent_err == False
     assert error == False
     assert busy == False
     assert counter == 0
     dut._log.info(">>> PASSED: Absorb")
-    error, busy, counter = await read_status(dut, spi_master)
+    spi_err, spongent_err, error, busy, counter = await read_status(dut, spi_master)
+    assert spi_err == False
+    assert spongent_err == False
     assert error == False
     assert busy == True
     assert counter == 0
     dut._log.info(">>> PASSED: Status read (busy)")
-    error, busy, counter = await write_data(dut, spi_master, (0x99 << 1) | 0b1 << 6)
+    spi_err, spongent_err, error, busy, counter = await write_data(dut, spi_master, (0x99 << 1) | 0b1 << 6)
+    assert spi_err == False
+    assert spongent_err == False
     assert error == True
     assert busy == True
     assert counter == 0
     dut._log.info(">>> PASSED: Write while busy")
     
-    dut._log.info("")
     dut._log.info("Waiting 100 clock cycles")
     await ClockCycles(dut.clk, 100)
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Control write (breakpoint at lfsr)")
-    error, busy, counter = await write_control(dut, spi_master, 0, LFSR, 0)
+    dut._log.info("\n>>> Test: Control write (breakpoint at lfsr)")
+    spi_err, spongent_err, error, busy, counter = await write_control(dut, spi_master, 0, LFSR, 0)
+    assert spi_err == False
+    assert spongent_err == False
     assert error == False
     assert busy == True
     assert counter == 0
     dut._log.info(">>> PASSED: Control write (breakpoint at lfsr)")
 
-    dut._log.info("")
     dut._log.info("Waiting 100 clock cycles")
     await ClockCycles(dut.clk, 100)
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Control write (breakpoint at sbox)")
-    error, busy, counter = await write_control(dut, spi_master, 0, SBOX, 0)
+    dut._log.info("\n>>> Test: Control write (breakpoint at sbox)")
+    spi_err, spongent_err, error, busy, counter = await write_control(dut, spi_master, 0, SBOX, 0)
+    assert spi_err == False
+    assert spongent_err == False
     assert error == False
     assert busy == True
     assert counter == 0
     dut._log.info(">>> PASSED: Control write (breakpoint at sbox)")
 
-    dut._log.info("")
     dut._log.info("Waiting 100 clock cycles")
     await ClockCycles(dut.clk, 100)
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Control write (breakpoint at player)")
-    error, busy, counter = await write_control(dut, spi_master, 0, PLAYER, 0)
+    dut._log.info("\n>>> Test: Control write (breakpoint at player)")
+    spi_err, spongent_err, error, busy, counter = await write_control(dut, spi_master, 0, PLAYER, 0)
+    assert spi_err == False
+    assert spongent_err == False
     assert error == False
     assert busy == True
     assert counter == 0
     dut._log.info(">>> PASSED: Control write (breakpoint at player)")
 
-    dut._log.info("")
     dut._log.info("Waiting 100 clock cycles")
     await ClockCycles(dut.clk, 100)
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Control write (breakpoint at absorb)")
-    error, busy, counter = await write_control(dut, spi_master, 0, ABSORB, 0)
+    dut._log.info("\n>>> Test: Control write (breakpoint at absorb)")
+    spi_err, spongent_err, error, busy, counter = await write_control(dut, spi_master, 0, ABSORB, 0)
+    assert spi_err == False
+    assert spongent_err == False
     assert error == False
     assert busy == True
     assert counter == 0
     dut._log.info(">>> PASSED: Control write (breakpoint at absorb)")
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Control write (breakpoint at idle)")
-    error, busy, counter = await write_control(dut, spi_master, 0, IDLE, 0)
+    dut._log.info("\n>>> Test: Control write (breakpoint at idle)")
+    spi_err, spongent_err, error, busy, counter = await write_control(dut, spi_master, 0, IDLE, 0)
+    assert spi_err == False
+    assert spongent_err == False
     assert error == False
     assert busy == True
     # assert counter == 1
     dut._log.info(">>> PASSED: Control write (breakpoint at idle)")
 
-    dut._log.info("")
     dut._log.info("Waiting for ready")
     await wait_for_ready(dut, spi_master)
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Status read (ready)")
-    error, busy, counter = await read_status(dut, spi_master)
+    dut._log.info("\n>>> Test: Status read (ready)")
+    spi_err, spongent_err, error, busy, counter = await read_status(dut, spi_master)
+    assert spi_err == False
+    assert spongent_err == False
     assert error == False
     assert busy == False
     assert counter == 0
     dut._log.info(">>> PASSED: Status read (ready)")
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Entire state")
+    dut._log.info("\n>>> Test: Entire state")
     state = await read_entire_state(dut, spi_master)
     assert state == EXPECTED_STATE_END
     dut._log.info(">>> PASSED: Entire state")
 
-    dut._log.info("")
-    dut._log.info(">>> Test: Control write (reset)")
-    error, busy, counter = await write_control(dut, spi_master, 0, IDLE, 1)
+    # We need to test this feature more, especially after a permutation or round
+    dut._log.info("\n>>> Test: Control write (reset)")
+    spi_err, spongent_err, error, busy, counter = await write_control(dut, spi_master, 0, IDLE, 1)
+    assert spi_err == False
+    assert spongent_err == False
     assert error == False
     assert busy == False
     assert counter == 0
     dut._log.info(">>> PASSED: Control write (reset)")
     
-
-    dut._log.info("")
-    dut._log.info(">>> Test: hash test vector")
+    dut._log.info("\n>>> Test: Test a full hash vector in current setup")
     hash_result = await hash(dut, spi_master, TEST_VECTOR, int(216/8))
     assert hash_result == EXPECTED_HASH
-    dut._log.info(">>> PASSED: hash test vector")
+    dut._log.info(">>> PASSED: hash test vector (init)")
+    
 
     # DO NOT REMOVE THIS COMMENT
     # TODO: One of the test cases for testing spi should be mass write
@@ -355,6 +429,13 @@ async def test_project(dut):
     # actual HW vs the simulation
     
     await ClockCycles(dut.clk, 20)
+    
+    
+    
+    
+    
+    
+    # ========================================= COMPONENT FUNCTIONAL TESTING =========================================
     dut._log.info("---------------- CHECKING WITH PYTHON IMPLEMENTATION ----------------")    
     
     component_states, spongent = load_expected_values(dut, message_block=(0x67 << 1) | 0b1)
@@ -418,7 +499,9 @@ async def test_project(dut):
                 # First step, set the break point at the correct location
                 dut._log.info(f"\n----- SET BREAKPOINT AT {FSM_STATES_NAMES[i+1]} -----")
                 dut._log.info(">>> Test: Control write")
-                error, busy, counter = await write_control(dut, spi_master, 0, FSM_STATES[i+1], 0)
+                spi_err, spongent_err, error, busy, counter = await write_control(dut, spi_master, 0, FSM_STATES[i+1], 0)
+                assert spi_err == False
+                assert spongent_err == False
                 assert error == False
                 assert busy == False if reset_per_component else True
                 if (cnt == 0):
@@ -435,12 +518,16 @@ async def test_project(dut):
                 # Second step, absorb a byte of data into the state registers once. Only permit re-absorbing at each breakpoint if you reset everything
                 if (reset_per_component or first_time_absorbing): 
                     dut._log.info(f"\n>>> Test: Absorb + status read (busy)")
-                    error, busy, counter = await write_data(dut, spi_master, message_block)
+                    spi_err, spongent_err, error, busy, counter = await write_data(dut, spi_master, message_block)
+                    assert spi_err == False
+                    assert spongent_err == False
                     assert error == False
                     assert busy == False
                     assert counter == cnt
                     dut._log.info(">>> PASSED: Absorb")
-                    error, busy, counter = await read_status(dut, spi_master)
+                    spi_err, spongent_err, error, busy, counter = await read_status(dut, spi_master)
+                    assert spi_err == False
+                    assert spongent_err == False
                     assert error == False
                     assert busy == True
                     assert counter == cnt
@@ -451,7 +538,9 @@ async def test_project(dut):
                 
                 # Third step, try writing while the system is busy
                 dut._log.info(f"\n>>> Test: Write while busy at {FSM_STATES_NAMES[i+1]}")
-                error, busy, counter = await write_data(dut, spi_master, (0x99 << 1) | (1 << 6))
+                spi_err, spongent_err, error, busy, counter = await write_data(dut, spi_master, (0x99 << 1) | (1 << 6))
+                assert spi_err == False
+                assert spongent_err == False
                 assert error == True
                 assert busy == True
                 assert counter == cnt
@@ -477,17 +566,104 @@ async def test_project(dut):
                 component_states = apply_next_round(spongent, component_states)
                 dut._log.debug(f"After: {component_states}")
                     
+                    
     dut._log.info(f"\n---------------- RESET AT EACH BREAKPOINT, 1 ROUND ----------------")        
+    time.sleep(3) 
     await component_tests(dut, spi_master, (0x67 << 1) | 0b1, component_states, reset_per_component=True, permutation=False)
     dut._log.info(f"\n---------------- RESET ONCE, TRAVERSE EACH BREAKPOINT, 1 ROUND ----------------") 
+    time.sleep(3) 
     await component_tests(dut, spi_master, (0x67 << 1) | 0b1, component_states, reset_per_component=False, permutation=False)
-    dut._log.info(f"\n---------------- PERMUTATION: 45 ROUNDS WITH BREAKPOINTS WITH PRE-SET INPUT ----------------") 
+    dut._log.info(f"\n---------------- PERMUTATION: 45 ROUNDS, EACH WITH BREAKPOINTS, WITH PRE-SET INPUT ----------------") 
+    time.sleep(3) 
     await component_tests(dut, spi_master, (0x67 << 1) | 0b1, component_states, reset_per_component=False, permutation=True)
     
     # Try the full permutation with a randomly generated byte
-    dut._log.info(f"\n---------------- PERMUTATION: BREAKPOINTS WITH RANDOM INPUT BYTE ----------------") 
+    dut._log.info(f"\n---------------- PERMUTATION: 45 ROUNDS, EACH WITH BREAKPOINTS, WITH RANDOM INPUT BYTE ----------------") 
+    time.sleep(3) 
     custom_random_byte = random.randint(0, 255)
     component_states, spongent = load_expected_values(dut, message_block=custom_random_byte)
     await component_tests(dut, spi_master, custom_random_byte, component_states, reset_per_component=False, permutation=True)
     
+    dut._log.info(f"\nThe behavior for each component is as expected, and the system behavior is expected for a single permutation")
+    
+    dut._log.info(f"")
+     
+     
+    
+    
+    # ========================================= FULL-COMPONENT HASH FUNCTIONAL TESTING =========================================
+    dut._log.info("\n\nReset\n\n")
+    dut.ena.value = 1
+    dut.ui_in.value = 0
+    dut.uio_in.value = 0
+    dut.rst_n.value = 0
+
+    await ClockCycles(dut.clk, 5)
+    dut.rst_n.value = 1
+    await ClockCycles(dut.clk, 10)
+                        
+    dut._log.info("\n---------------- TESTING FULL HASH VECTORS ----------------")
+    time.sleep(3)                    
+    dut._log.info("\n>>> Test: Test a full hash vector after hard reset")
+    hash_result = await hash(dut, spi_master, TEST_VECTOR, int(216/8))
+    assert hash_result == EXPECTED_HASH
+    dut._log.info(">>> PASSED: hash test vector (hard reset)")
+    
+    # Reset
+    # Insert random test vectors here, maybe in a loop, for different sizes
+    
+    
+    
+    
+    # ========================================= TRANSITIONAL BEHAVIOR TESTS =========================================
+    dut._log.info("\n---------------- CHECKING STATE BEFORE AND AFTER RESETTING PREVIOUS STATE ----------------")
+    time.sleep(3) 
+    dut._log.info("\n>>> Test: Test a full hash vector without resetting (corrupted state)")
+    hash_result = await hash(dut, spi_master, TEST_VECTOR, int(216/8))
+    assert hash_result != EXPECTED_HASH
+    dut._log.info(">>> PASSED: corrupt state hash test vector")
+    
+    dut._log.info("\n>>> Test: Control write (reset)")
+    spi_err, spongent_err, error, busy, counter = await write_control(dut, spi_master, 0, IDLE, 1)
+    assert spi_err == False
+    assert spongent_err == False
+    assert error == False
+    assert busy == False
+    assert counter == 0 # This might fail?
+    dut._log.info(">>> PASSED: Control write (reset)")
+    
+    # read all state
+    dut._log.info("\n>>> Test: Entire state")
+    state = await read_entire_state(dut, spi_master)
+    assert state == 0
+    dut._log.info(">>> PASSED: Entire state")
+        
+    dut._log.info("\n>>> Test: Check if state registers are cleared")
+    rx_data = await read_data(dut, spi_master)
+    assert rx_data == 0x0 # ensure that at least the LSByte of the state is 0
+    dut._log.info(">>> PASSED: State registers are cleared")
+    # begin permutation
+    
+    await wait_for_ready(dut, spi_master)
+    dut._log.info("\n>>> Test: Check if state registers change after reading once")
+    state = await read_entire_state(dut, spi_master)
+    dut._log.info(f"State: {state}")
+    assert state != 0x0 # after reading again, the state should have gone through a permutation
+    dut._log.info("\n>>> PASSED: State registers change after reading once")
+    
+    dut._log.info("\n>>> Test: Control write (reset)")
+    spi_err, spongent_err, error, busy, counter = await write_control(dut, spi_master, 0, IDLE, 1)
+    assert spi_err == False
+    assert spongent_err == False
+    assert error == False
+    assert busy == False
+    assert counter == 0
+    dut._log.info(">>> PASSED: Control write (reset)")
+        
+    dut._log.info("\n>>> Test: Test a full hash vector after a soft reset")
+    hash_result = await hash(dut, spi_master, TEST_VECTOR, int(216/8))
+    assert hash_result == EXPECTED_HASH
+    dut._log.info(">>> PASSED: Full hash after a soft reset")
+    
+
 
