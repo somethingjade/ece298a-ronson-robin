@@ -39,7 +39,7 @@ Once the first 2 message bits (the command bits) have been received, the command
 - `READ_STATUS` (`11`)
     - The current status is determined combinationally, and the corresponding bits are placed into the output shift register
 
-Note that all commands other than `READ_DATA` output the status, which is determined combinationally each time.
+Note that all commands other than `READ_DATA` output the status, which is determined combinationally each time. Note also that the output is loaded into the shift register on the earliest possible clock cycle; i.e., on the clock cycle immediately after the 2 command bits have been received.
 
 By counting the number of received bits and handling message bits individually based on their index (see below FSM state descriptions for more details), we avoid needing a shift register for the entire message; we only need to store the 2-bit command, which determines how the rest of the message is handled.
 
