@@ -31,15 +31,13 @@ Reset value: `0x00`
 | r | r | r |
 | `error` | `busy` | `counter` |
 
-`error`: error status
-- `0`: no error
-- `1`: error
-
-`busy`: busy status
-- `0`: not busy (current FSM state is `IDLE`)
-- `1`: busy (current FSM state is not `IDLE`)
-
-`counter`: value of 6-bit round counter
+- `error`: error status
+    - `0`: no error
+    - `1`: error
+- `busy`: busy status
+    - `0`: not busy (current FSM state is `IDLE`)
+    - `1`: busy (current FSM state is not `IDLE`)
+- `counter`: value of 6-bit round counter
 
 ### Control register
 Reset value: `0x00`
@@ -48,22 +46,20 @@ Reset value: `0x00`
 | w | w | w |
 | `read_byte` | `breakpoint` | `reset` |
 
-`read_byte`: selects which byte is read by `READ_DATA` command
-- Valid range: `[0, 10]` (`0x0` to `0xA`)
-- If `read_byte` is outside of the valid range, byte 0 will be read by `READ_DATA`, but reading will not trigger an application of the `PI_b` permutation \[1\] (see [design doc](./spongent_core_design.md) for more details)
-
-`breakpoint`: selects an FSM state to pause execution at
-- Valid values:
-    - `000`: `IDLE`
-    - `001`: `ABSORB`
-    - `010`: `LFSR`
-    - `011`: `SBOX`
-    - `100`: `PLAYER`
-- Refer to [design doc](./spongent_core_design.md) for details
-
-`reset`: software reset
-- `0`: do not reset
-- `1`: reset SPONGENT-88 core
+- `read_byte`: selects which byte is read by `READ_DATA` command
+    - Valid range: `[0, 10]` (`0x0` to `0xA`)
+    - If `read_byte` is outside of the valid range, byte 0 will be read by `READ_DATA`, but reading will not trigger an application of the `PI_b` permutation \[1\] (see [design doc](./spongent_core_design.md) for more details)
+- `breakpoint`: selects an FSM state to pause execution at
+    - Valid values:
+        - `000`: `IDLE`
+        - `001`: `ABSORB`
+        - `010`: `LFSR`
+        - `011`: `SBOX`
+        - `100`: `PLAYER`
+    - Refer to [design doc](./spongent_core_design.md) for details
+- `reset`: software reset
+    - `0`: do not reset
+    - `1`: reset SPONGENT-88 core
 
 ## References
 \[1\] A. Bogdanov, M. Knezevic, G. Leander, D. Toz, K. Varici, I. Verbauwhede, "SPONGENT: A Lightweight Hash Function," in CHES 2011, 2011, pp. 312-325, doi: https://doi.org/10.1007/978-3-642-23951-9_21.
