@@ -4,7 +4,7 @@
 |:---:|:---:|
 | Tiles | 1x1 |
 | Interface | SPI |
-| SPI mode | 1 (CPOL = 0, CPHA = 1) |
+| SPI mode | 1 (CPOL = 0, CPHA = 1) \[1\] |
 | Bit order | MSB first |
 | Byte order | Big-endian |
 | Clock frequency | 50 MHz |
@@ -48,7 +48,7 @@ Reset value: `0x00`
 
 - `read_byte`: selects which byte is read by `READ_DATA` command
     - Valid range: `[0, 10]` (`0x0` to `0xA`)
-    - If `read_byte` is outside of the valid range, byte 0 will be read by `READ_DATA`, but reading will not trigger an application of the `PI_b` permutation \[1\] (see [design doc](./spongent_core_design.md) for more details)
+    - If `read_byte` is outside of the valid range, byte 0 will be read by `READ_DATA`, but reading will not trigger an application of the `PI_b` permutation \[2\] (see [design doc](./spongent_core_design.md) for more details)
 - `breakpoint`: selects an FSM state to pause execution at
     - Valid values:
         - `000`: `IDLE`
@@ -62,4 +62,6 @@ Reset value: `0x00`
     - `1`: reset SPONGENT-88 core
 
 ## References
-\[1\] A. Bogdanov, M. Knezevic, G. Leander, D. Toz, K. Varici, I. Verbauwhede, "SPONGENT: A Lightweight Hash Function," in CHES 2011, 2011, pp. 312-325, doi: https://doi.org/10.1007/978-3-642-23951-9_21.
+\[1\] "Serial Peripheral Interface." Wikipedia. Accessed: Nov. 26, 2026. [Online]. Available: https://en.wikipedia.org/wiki/Serial_Peripheral_Interface.
+
+\[2\] A. Bogdanov, M. Knezevic, G. Leander, D. Toz, K. Varici, I. Verbauwhede, "SPONGENT: A Lightweight Hash Function," in CHES 2011, 2011, pp. 312-325, doi: https://doi.org/10.1007/978-3-642-23951-9_21.
