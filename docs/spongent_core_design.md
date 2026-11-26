@@ -7,6 +7,9 @@ We wanted our device to be interfaced via a standard communication protocol. SPI
 
 Refer to \[2\] for details about the SPONGENT algorithm
 
+## System diagram
+![System diagram](./embed/spongent88_top_schematic.png)
+
 ## Design
 
 The SPONGENT-88 core module is implemented as a finite state machine (FSM) with 5 states:
@@ -65,6 +68,8 @@ By counting the number of received bits and handling message bits individually b
         - Note that until all rounds have been completed, the 6-bit counter will not be used for any other purpose, since `ABSORB` will not be repeated during the permutation
         - If all rounds have been completed (`counter == 44` since the counter has not been incremented yet at this point), we reset the 6-bit counter and transition back to `IDLE`; the `PI_b` permutation has completed
         - Otherwise, we increment the counter and transition to the `LFSR` state (the first step of the `PI_b` permutation)
+
+![FSM diagram](./embed/fsm_diagram.png)
 
 ## Debugging
 There is some debug functionality built into the design. Refer to [spec.md](./spec.md) for the register bitfields.
