@@ -24,7 +24,7 @@ FSM_STATES_NAMES = ["IDLE", "ABSORB", "LFSR", "SBOX", "PLAYER"]
 
 def decode_status(byte: int):
     """
-    Extracts the error, busy, and counter information from a the status (8 bits or more) read in from SPI. 
+    Extracts the error, busy, and counter information from the status (8 bits or more) read in from SPI. 
     Usually used after a write command, or a read status command. Don't use this on a read data cmd, as
     data in that scenario is interpretted differently. 
     
@@ -58,22 +58,55 @@ def decode_status(byte: int):
     return spi_err, spongent_err, error, busy, counter
 
 def encode_control(read_byte: int, pause_at: int, reset: int):
-    """Encode
+    """Encode the data section of a write_ctrl message into an 8 bit message with the format and order: *read_byte*[7:4] + *pause_at*[3:1] + *reset*[0]
 
     Args:
-        read_byte (int): _description_
-        pause_at (int): _description_
-        reset (int): _description_
+        read_byte (int): an integer 4-bits wide, where if 0, it represents a squeeze operation if and only if a breakpoint is not set. 
+            If from 1 to 11 inclusive, it represents which 1/11 bytes you wish to prepare the device to sample from, with no permutation immediately
+            following a read_data() call. Values 1-10 map linearly to bytes [2nd - 11th] (11th is MSByte), while value 11 maps to the 1st byte (1st is LSByte)
+            
+        pause_at (int): an integer 3 bits-wide. the fsm_state you want to set the breakpoint to. The possible fsm_states to pause at are ABSORB, LFSR,
+            SBOX, PLAYER, IDLE (setting to idle is equivalent to removing breakpoints)
+        reset (int): a binary value (0 or 1) representing if you want to perform a soft reset (clear device state and other registers
+            without reseting the entire board using rst_n). Note that a reset of any kind will clear breakpoints.
 
     Returns:
-        _type_: _description_
+        (int): the encoded 8-bit data section for a write_ctrl message
     """
     return ((read_byte & 0xF) << 4) | ((pause_at & 0b111) << 1) | (reset & 0b1)
 
-def generate_frame(command, data):
+def generate_frame(command: int, data: int):
+    """Create the full 16-bit wide message frame that will be written via SPI. The format looks like
+    *command*[15:14] + *data*[13:6] + *padding*[5:0].
+    
+    Args:
+        command (int): a 2-bit integer, either being WRITE_DATA (0), WRITE_CONTROL (1), READ_DATA (2), READ_STATUS (3)
+        data (int): an 8-bit integer, which is related to the command.
+            - For a write_ctrl message, use encode_control() for the data section.
+            - For a write_data message, the data section is up to the user.
+            - For a read_data message, the data section is not important. **Note that to use a read_data message, you must first send a write_ctrl message,**
+                as the write_ctrl message contains the information of which byte to read from the 88-bit state. *This limitation of needing to send both a write_ctrl
+                and read_data message to retreive a byte (instead of ONLY sending read_data) is caused by the fact that SPI requires both host and device to in/output
+                in the same transaction, and that our device can only determine what command is being requested after a certain number of spi-clocks, at which point it is 
+                already too late to send a full 8-bit message within that same transaction. This is also the limitation of using a 16-bit frame width.*
+            - For a read_status message, the data section is not important, and can be set to anything.
+
+    Returns:
+        (int): a 16-bit wide integer, represeting a full message frame.
+    """
     return ((command & 0b11) << 14) | ((data & 0xFF) << 6)
 
-async def read_entire_state(dut, spi_master):
+async def read_entire_state(dut: any, spi_master: SpiBus):
+    """Read the entire state (88 bits) at any given point, usually used after setting a breakpoint. This is implemented by reading
+    each byte of the state without triggering squeeze (AKA a permutation after each read).
+
+    Args:
+        dut (any): 
+        spi_master (SpiBus):
+
+    Returns:
+        (int): the entire 88-bit state
+    """
     state = 0
     tx_data = []
     # we can read an invalid byte (11) to read the least significant byte without starting another permutation
@@ -93,7 +126,28 @@ async def read_entire_state(dut, spi_master):
         state |= (rx_data[2*i + 1] << (8 * i))
     return state
 
-async def write_data(dut, spi_master, data):
+async def write_data(dut: any, spi_master: SpiBus, data: int):
+    """Write a byte of data to the device that you wish to be hashed. Expect that for each byte written, if no breakpoints are set,
+    a permutation should occur immediately following the message just sent from host. Message frame alignment and encodings are handled
+    internally.
+
+    Args:
+        dut (any): 
+        spi_master (SpiBus): 
+        data (int): a byte of the total data you want to hash. Note that for a message of n-bytes (whether it includes a
+            padding byte (0x8) or not), you would need to send each byte on it's own by calling this function
+            each time, and you need to send it in the order:
+            - byte n (MSByte)
+            - byte n-1
+            - byte n-2
+            - ...
+            - byte 2
+            - byte 1 (LSByte)
+
+    Returns:
+        (tuple[spi_err, spongent_err, error, busy, counter]): the tuple represeting the status returned from MISO in the same transaction as
+            the MOSI write was performed.
+    """
     tx_data = [generate_frame(WRITE_DATA, data & 0xFF)]
     dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
@@ -102,7 +156,44 @@ async def write_data(dut, spi_master, data):
     assert len(rx_data) == 1
     return decode_status(rx_data[0])
 
-async def write_control(dut, spi_master, read_byte, pause_at, reset):
+async def write_control(dut: any, spi_master: SpiBus, read_byte: int, pause_at: int, reset: int):
+    """Write a control message to the device. Message frame alignment and encodings are handled internally. The write_ctrl message can be
+    sent even when the device is busy (during a permutation). 
+    
+    For example, you can set a breakpoint at SBOX while the device is still in
+    permutation. Usually, the entire permutation happens much faster than the spi interface can deliver the message, so the device often receives
+    the message in idle. However, in the scenario that the message does get interpreted *during* a permutation, the next round in the permutation
+    may be paused at SBOX. Then you can keep changing the breakpoint to slowly increment the entire permutation.
+    
+    Another example is you can request a specific byte from the 88 bit state registers. You can tell the device which 1/11 bytes you wish to read
+    from the 88 bit state, then call read_data() to get that byte. e.g. If you chose the 4th byte, every time you read_data() you will still get back the
+    4th byte whether you set a breakpoint or not, until you change to a different byte. You can even construct the entire 88 bit state if you extract
+    all 11 bytes. There are caveats, so please read below.
+    
+    Args:
+        dut (any): _description_
+        spi_master (SpiBus): _description_
+        read_byte (int): an integer 4-bits wide, representing the byte you want to sample in an upcoming call to read_data().
+            Take note of the following mapping:
+            - 0 --> LSByte, and if no breakpoint set, trigger permutation after the read (AKA squeeze operation)
+            - 11 --> LSByte
+            - 1 --> 2nd LSByte
+            - 2 --> 3rd LSByte
+            - 3 --> 4th LSByte
+            - ...
+            - 9 --> 2nd MSByte
+            - 10 --> MSByte
+            
+                    
+        pause_at (int): an integer 3 bits-wide. the fsm_state you want to set the breakpoint to. The possible fsm_states to pause at are ABSORB, LFSR,
+            SBOX, PLAYER, IDLE (setting to idle is equivalent to removing breakpoints)
+        reset (int): a binary value (0 or 1) representing if you want to perform a soft reset (clear device state and other registers
+            without reseting the entire board using rst_n). Note that a reset of any kind will clear breakpoints.
+        
+    Returns:
+        (tuple[spi_err, spongent_err, error, busy, counter]): the tuple represeting the status returned from MISO in the same transaction as
+            the MOSI write was performed.
+    """
     tx_data = [generate_frame(WRITE_CONTROL, encode_control(read_byte, pause_at, reset))]
     dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
@@ -111,7 +202,22 @@ async def write_control(dut, spi_master, read_byte, pause_at, reset):
     assert len(rx_data) == 1
     return decode_status(rx_data[0])
 
-async def read_data(dut, spi_master) -> int:
+async def read_data(dut: any, spi_master: SpiBus) -> int:
+    """Read a byte from the state registers. Which byte is sampled is dependent on what you set using write_control().
+    If no breakpoints are set, and the read_byte set is 0, this performs a squeeze operation.
+    If a breakpoint is set, or the read_byte set is in the range from 1 to 11 inclusive, get only that selected byte, with no
+    permutations immediately following. Refer to ***write_control()*** for details.
+
+    Args:
+        dut (any):
+        spi_master (SpiBus):
+
+    Returns:
+        int: a 16-bit message in the format: *zero-padding*[15:10] + *spi_err*[9] + *spongent_err*[8] + *data*[7:0]
+        
+            spi_err and spongent_err (which can also be extracted from a status read) are always present. However, they may or may not
+            not be implemented in our design, so those values might always be zero, meaning the only important information is data[7:0].
+    """
     tx_data = [generate_frame(READ_DATA, 0)]
     dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
@@ -120,7 +226,16 @@ async def read_data(dut, spi_master) -> int:
     assert len(rx_data) == 1
     return rx_data[0]
 
-async def read_status(dut, spi_master):
+async def read_status(dut: any, spi_master: SpiBus):
+    """Read the status.
+
+    Args:
+        dut (any):
+        spi_master (SpiBus):
+
+    Returns:
+        (tuple[spi_err, spongent_err, error, busy, counter]): the tuple represeting the status returned
+    """
     tx_data = [generate_frame(READ_STATUS, 0)]
     dut._log.debug(f"TX: {' '.join(f'{num:016b}' for num in tx_data)}")
     await spi_master.write(tx_data)
@@ -148,17 +263,23 @@ async def wait_for_ready(dut: any, spi_master: SpiBus):
     return not error
 
 async def hash(dut: any, spi_master: SpiBus, msg: int, num_bytes: int):
-    """Performs a full hash operation. Note the following expected behavior:
+    """    
+    **If you set a breakpoint or you used write_ctrl to set a specific read_byte, the behavior or outcome
+    of this specific hash call may not work as intended, and can yield in a deadlock.**
+        
+    Performs a full hash operation, **given that you set up the system properly before calling this**.
+    Note the following expected behavior:
     1 Absorption per hash, 1 grouping of (LFSR >> sBox >> pLayer) per round,
-    45 rounds per permutaiton, 1 permutation per byte of message (including padding),
-    1 permutation per 8/88 bits read back from state registers
-
+    45 rounds per permutaiton, 1 permutation per byte of message (including 0x8 padding),
+    1 permutation per 8/88 bits read back from state registers.
+    
     Args:
         dut (any): 
         spi_master (SpiBus): The SpiBus containing the 4 signals required for transactions
         msg (int): a byte-aligned value of otherwise arbitrary length that the user plans to get hashed.
             Byte alignment is requied due to the limitations of our spongent implementation.
             e.g. actual message: 0110 --> byte-aligned: 00000110
+            
             Pre-processing such as bit shifting, masking control bits, write/read operatoins, are performed internally.
         num_bytes (int): How many bytes the message is
 
@@ -178,11 +299,26 @@ async def hash(dut: any, spi_master: SpiBus, msg: int, num_bytes: int):
     await wait_for_ready(dut, spi_master)
     return ret
 
-def load_expected_values(dut, message_block):  
+def load_expected_values(dut: any, message_block: int):
+    """Using the python implementation of SPONGENT, create a spongent object and perform a single round
+    (absorb, lfsr, sbox, player) on a 1-byte input message, and track the state registers at the end
+    of each fsm_state/operation.
+
+    Args:
+        dut (any):
+        message_block (int): a byte-wide input message
+
+    Returns:
+        tuple[ list[absorb_state, lfsr_state, sbox_state, player_state], spongent ]:
+            a list containing the expected value of the state registers at each fsm_state in only one round,
+            as well as the spongent object
+    """
+      
     # Create the Spongent-88 instance
     spongent = SPONGENT.SPONGENT(n=88, c=80, r=8, R=45)
     # Initial 88-bit state (all zeros)
     state = 0
+    message_block = message_block & 0xFF
     
     # 1. Absorb: XOR message into LSB 8 bits
     state ^= message_block 
@@ -218,6 +354,18 @@ def load_expected_values(dut, message_block):
     return [absorb_state, lsfr_state, sbox_state, player_state], spongent
 
 def apply_next_round(spongent: SPONGENT.SPONGENT, previous_states: list):
+    """Apply the next round of a permutation to a list of previous states and update that list. While the list
+    contains absorb_state, lfsr_state, sbox_state, player_state, only the player_state is used to compute
+    the next lfsr, sbox, and player states. Absorb_state stays the same, granted it only occurs once per
+    permutation.
+
+    Args:
+        spongent (SPONGENT.SPONGENT): the spongent object used to load the initial values of the states
+        previous_states (list): a list containing [absorb_state, lfsr_state, sbox_state, player_state]
+
+    Returns:
+        list[absorb_state, lfsr_state, sbox_state, player_state]: an updated list of the state registers at each fsm_state
+    """
     state = previous_states[-1]
 
     tmp = spongent.LFSR
@@ -553,6 +701,7 @@ async def test_project(dut):
                 dut._log.info(f">>> PASSED: Least significant byte of SPONGENT-88 state at {FSM_STATES_NAMES[i+1]}")
                 
                 # Fifth step, read the LSByte from the state registers AGAIN to ensure state is not changing without any mosi input
+                # Note that a permutation will not happen since the breakpoint is not set to IDLE
                 await ClockCycles(dut.clk, 10)
                 dut._log.info(f"\n>>> Test: LSByte again after 10clck delay at {FSM_STATES_NAMES[i+1]}")
                 rx_data = await read_data(dut, spi_master)
@@ -665,5 +814,11 @@ async def test_project(dut):
     assert hash_result == EXPECTED_HASH
     dut._log.info(">>> PASSED: Full hash after a soft reset")
     
+    
+    # I wanna try using a read_data command to try to set a write_ctrl command, not sure if thats possible
+    # Also considering that I was writing the doc string comments for these functions, I have discovered
+    # some possible tests to check unwarranted behavior, especially when using write_ctrl()
+    # the full hash function doesn't set a breakpoint, nor does it use write_ctrl to set read_byte to 0,
+    # so it is possible to get a corrupt hash out! We need to test this
 
 

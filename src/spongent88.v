@@ -106,7 +106,7 @@ module spongent88_core (
 		end else begin
 			if (sck_rise) begin
 				// 2 most significant message bits received
-				// handle
+				// handle the MISO transactions
 				if (msg_counter == 2) begin
 					case (command)
 						// write data
@@ -130,7 +130,7 @@ module spongent88_core (
 						WRITE_CONTROL: begin
 							miso[7] <= 0; // no error for now?
 							// busy if not idle
-							miso[6] <= fsm_state != IDLE;
+							miso[6] <= busy;
 							miso[5:0] <= counter;
 						end
 						// read data
@@ -141,9 +141,9 @@ module spongent88_core (
 							// it's like this for
 							// testing.
 							if (fsm_state == control_breakpoint) begin
-								read_byte = ((control_read_byte < 11) ? control_read_byte : 0) * 8;
+								read_byte = ((control_read_byte < 11) ? control_read_byte : 0) * 8; // read_byte is the value determined from a previous MOSI write_ctrl transaction
 								miso <= state[read_byte +: 8];
-								if (control_breakpoint == IDLE && control_read_byte == 0) begin
+								if (control_breakpoint == IDLE && control_read_byte == 0) begin // perform squeeze 
 									counter <= 6'b0;
 									lfsr <= 6'b000101;
 									fsm_state <= LFSR;
@@ -165,7 +165,7 @@ module spongent88_core (
 					miso <= { miso[6:0], 1'b0 };
 				end
 			end else if (sck_fall) begin
-				// read in new bit
+				// read in new bit, intepret the MOSI transaction
 				if (msg_counter < 2) begin
 					command <= { command[0], rx }; // command[0] dictates read or write state. Who is writing to that?
 					// the if block triggers for the first two MSB of the message, but then the command always becomes write data, write control, and never read
