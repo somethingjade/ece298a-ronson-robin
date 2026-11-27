@@ -560,8 +560,7 @@ async def test_project(dut):
     
     
     
-    
-    #'''
+
     
     # ========================================= COMPONENT FUNCTIONAL TESTING =========================================
     dut._log.info("---------------- CHECKING WITH PYTHON IMPLEMENTATION ----------------")    
@@ -798,14 +797,15 @@ async def test_project(dut):
         
         assert expected_result == hash_result, "FAIL"
         dut._log.info(f">>> PASSED: Random hash vector {i}")
-    #'''
+
     
     # ========================================= NEGATIVE TESTING =========================================
     # I wanna try using a read_data command to try to set a write_ctrl command, not sure if thats possible
     # Also considering that I was writing the doc string comments for these functions, I have discovered
     # some possible tests to check unwarranted behavior, especially when using write_ctrl()
     # the full hash function doesn't set a breakpoint, nor does it use write_ctrl to set read_byte to 0,
-    # so it is possible to get a corrupt hash out! We need to test this
+    # so it is possible to get a corrupt hash out! We need to test this, but this is a buggy implementation from
+    # the testing interface, and not of our verilog design
     
     dut._log.info("\n\nReset\n\n")
     dut.ena.value = 1
@@ -820,20 +820,48 @@ async def test_project(dut):
     time.sleep(3)
     # Setting a breakpoint that doesn't exist
     dut._log.info("\n>>> Test: Set a fake breakpoint and check if squeeze is blocked")
-    status = await write_control(dut, spi_master, 0, 7, 0)
-    verify_status(status, False, False, False, False, 0)    
-    # Expected behavior is that none of the fsm_states are paused, but squeeze is also blocked
-    state = await read_entire_state(dut, spi_master, 7)
-    assert state == 0
+    for j in range(4, 8):    
+        status = await write_control(dut, spi_master, 0, j, 0)
+        verify_status(status, False, False, False, False, 0)    
+        # Expected behavior is that none of the fsm_states are paused, but squeeze is also blocked
+        state = await read_entire_state(dut, spi_master, j)
+        assert state == 0
+        
+        for i in range(5):
+            await wait_for_ready(dut, spi_master)
+            rx_data = await read_data(dut, spi_master)
+            assert rx_data == 0x0, f"Squeeze was not blocked at iteration {i}"
+        
+        state = await read_entire_state(dut, spi_master, IDLE)
+        assert state == 0
+    dut._log.info(">>> PASSED: State remains unchanged after squeeze")  
     
-    for i in range(10):
-        await wait_for_ready(dut, spi_master)
-        rx_data = await read_data(dut, spi_master)
-        assert rx_data == 0x0, f"Squeeze was not blocked at iteration {i}"
+    dut._log.info("\n>>> Test: Set a fake breakpoint on a non-zero state and check if squeeze returns 0")
+    status = await write_control(dut, spi_master, 0, IDLE, 0)
+    verify_status(status, False, False, False, False, 0)
+    await wait_for_ready(dut, spi_master)
+    rx_data = await read_data(dut, spi_master)
+    assert rx_data == 0x0
+    await wait_for_ready(dut, spi_master)
     
-    state = await read_entire_state(dut, spi_master, IDLE)
-    assert state == 0
-    dut._log.info(">>> PASSED: State remains unchanged after squeeze")
+    for j in range(4, 8):    
+        status = await write_control(dut, spi_master, 0, j, 0)
+        verify_status(status, False, False, False, False, 0)    
+        # Expected behavior is that none of the fsm_states are paused, but squeeze is also blocked
+        state = await read_entire_state(dut, spi_master, j)
+        assert state == 0
+        
+        for i in range(5):
+            await wait_for_ready(dut, spi_master)
+            rx_data = await read_data(dut, spi_master)
+            assert rx_data == 0x0, f"Squeeze was not blocked at iteration {i}"
+        
+        state = await read_entire_state(dut, spi_master, IDLE)
+        assert state == 0x7CC08139EB7F16CFCEF382
+    dut._log.info(">>> PASSED: No squeeze operations happened")
+    
+    status = await write_control(dut, spi_master, 0, IDLE, 1)
+    verify_status(status, False, False, False, False, 0)
     
     dut._log.info("\n>>> Test: Try writing control messages without using write_ctrl")
     await wait_for_ready(dut, spi_master)
@@ -897,3 +925,18 @@ async def test_project(dut):
     status = await read_status(dut, spi_master, encode_control(11, PLAYER, 0))
     verify_status(status, False, False, False, False, 0)
     dut._log.info(">>> PASSED: read_status() did not trigger write_ctrl behaviors")
+    
+    dut._log.info("\n>>> Test: Set a read_byte index larger than 11")
+    status = await write_control(dut, spi_master, 0, IDLE, 1)
+    verify_status(status, False, False, False, False, 0)
+    rx_data = await read_data(dut, spi_master)
+    assert rx_data == 0
+    # Permutation
+    await wait_for_ready(dut, spi_master)
+    for i in range (11, 16):
+        status = await write_control(dut, spi_master, i, IDLE, 0)
+        verify_status(status, False, False, False, False, 0)
+        rx_data = await read_data(dut, spi_master)
+        assert rx_data == 0x82  
+    
+    dut._log.info(">>> PASSED: Equivalent to setting to index 11")

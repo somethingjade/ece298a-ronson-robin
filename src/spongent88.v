@@ -140,7 +140,7 @@ module spongent88_core (
 							// progress. for now,
 							// it's like this for
 							// testing.
-							if (fsm_state == control_breakpoint) begin
+							if (fsm_state == control_breakpoint) begin // this section happens before the incoming control information is parsed
 								read_byte = ((control_read_byte < 11) ? control_read_byte : 0) * 8; // read_byte is the value determined from a previous MOSI write_ctrl transaction
 								miso <= state[read_byte +: 8];
 								if (control_breakpoint == IDLE && control_read_byte == 0) begin // perform squeeze 
